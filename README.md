@@ -1,7 +1,8 @@
 # Warfarin_dose-Prediction
-This is a regression model used for warfarin dose prediction.
+This is a regression model used for warfarin dose prediction. Using Linear regression model, Poly linear regression model, and Random forest regression.
+The data used is modified from the source below.
 
-Origional dataset resource:
+Original dataset source:
 
 International Warfarin Pharmacogenetics Consortium (IWPC)
 
