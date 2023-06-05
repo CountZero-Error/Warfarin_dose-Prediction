@@ -12,3 +12,8 @@ https://api.pharmgkb.org/v1/download/submission/553247439
 Reference
 
 Truda, G., & Marais, P. (2021). Evaluating warfarin dosing models on multiple datasets with a novel software framework and evolutionary optimisation. Journal of Biomedical Informatics, 113, 103634. https://doi.org/10.1016/j.jbi.2020.103634
+
+---
+# To Run
+1. Run command ```pip install -r requirements.txt```
+2. Run ```main.py```
