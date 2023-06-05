@@ -42,7 +42,7 @@ def prediction(ui, model):
 
 if __name__ == '__main__':
     # Load model
-    with open('../models/RFR.pkl', 'rb') as filo:
+    with open('Warfarin_dose-Prediction-main\models\RFR.pkl', 'rb') as filo:
         model = pickle.load(filo)
 
     app = QApplication(sys.argv)
