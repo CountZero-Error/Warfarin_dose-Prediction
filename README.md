@@ -16,4 +16,14 @@ Truda, G., & Marais, P. (2021). Evaluating warfarin dosing models on multiple da
 ---
 # To Run
 1. Run command ```pip install -r requirements.txt```
-2. Run ```main.py```
+2. Go to UI directory
+3. Run ```main.py```
+
+---
+# Models
+To change the model, you need to replace the model path in main.py line 45 (with open(model_path, 'rb') as filo:).
+
+Modedls are in models directory:
+1. RFR.pkl - Random Forest Regression
+2. lin.pkl - Linear Regression
+3. poly.pkl - Polynomial Linear Regression
