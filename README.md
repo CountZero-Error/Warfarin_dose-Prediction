@@ -1,7 +1,7 @@
 # Warfarin_dose-Prediction
 This is a regression model used for warfarin dose prediction.
 
-Dataset used:
+Dataset resource:
 
 International Warfarin Pharmacogenetics Consortium (IWPC)
 
