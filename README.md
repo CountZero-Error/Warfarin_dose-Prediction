@@ -23,7 +23,7 @@ Truda, G., & Marais, P. (2021). Evaluating warfarin dosing models on multiple da
 # Models
 The default model used is  Random Forest Regression.
 
-To change the model, you need to replace the model path in main.py line 45 (with open(model_path, 'rb') as filo:).
+To change the model, you need to replace the model path in ```main.py``` line 45 (```with open(model_path, 'rb') as filo:```).
 
 Modedls are in models directory:
 1. RFR.pkl - Random Forest Regression
