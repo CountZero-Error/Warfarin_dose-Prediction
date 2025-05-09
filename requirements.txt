@@ -1,5 +1,0 @@
-PyQt5
-pyqt5-tools
-pandas
-matplotlib
-scikit-learn
