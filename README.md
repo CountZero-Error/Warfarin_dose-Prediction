@@ -34,9 +34,13 @@ Result see `feature_importance.ipynb`.
 1. Run command ```pip install -r requirements.txt```
 2. Go to UI directory
 3. Run ```main.py```
-
+  
 ---
-# Models
+# Old Version Directory  
+Use regression model for warfarin dose prediction.  
+Using Linear regression model, Poly linear regression model, and Random forest regression.  
+  
+## Models
 The default model used is  Random Forest Regression.
 
 To change the model, you need to replace the model path in ```main.py``` line 45 (```with open(model_path, 'rb') as filo:```).
@@ -45,11 +49,6 @@ Modedls are in models directory:
 1. RFR.pkl - Random Forest Regression
 2. lin.pkl - Linear Regression
 3. poly.pkl - Polynomial Linear Regression
-  
----
-# Old Version Directory  
-Use regression model for warfarin dose prediction.  
-Using Linear regression model, Poly linear regression model, and Random forest regression.  
   
 ## To Run Old Version:
 1. Go to the top level directory of Old_version directory  
