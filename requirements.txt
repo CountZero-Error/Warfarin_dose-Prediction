@@ -1,0 +1,12 @@
+# Utility
+numpy
+pandas
+matplotlib
+
+# Machine Learning
+scikit-learn
+
+# PyTorch (For MPS & CPU, if you want to use GPU, check your CUDA version and fellow the instructions in https://pytorch.org)
+torch 
+torchvision 
+torchaudio
