@@ -51,7 +51,7 @@ Modedls are in models directory:
 3. poly.pkl - Polynomial Linear Regression
   
 ## To Run Old Version:
-1. Go to the top level directory of Old_version directory  
+1. Go to the top level directory of old_version directory  
 2. Run command ```pip install -r requirements.txt```
 3. Go to UI directory
 4. Run ```main.py```
