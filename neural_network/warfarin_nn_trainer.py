@@ -136,12 +136,12 @@ class trainer:
         test_loader = DataLoader(test_ds, batch_size=self.batch_size, shuffle=False)
 
         """------------------ 4) Model/optimiser ------------------"""
-        print('[*] Initializing neural network...')
+        print('[*] Initializing neural network:')
         device = torch.device('cuda' if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-        print(f'\tUsing {device}.')
+        print(f'Using {device}.')
 
         model = FeedForwardNN(X_train.shape[1]).to(device)
-        print(f'\tModel:\n{model}\n')
+        print(f'Model:\n{model}\n')
 
         criterion = nn.MSELoss()
         optimizer = torch.optim.AdamW(params=model.parameters(), lr=self.lr, weight_decay=1e-5)
@@ -152,27 +152,41 @@ class trainer:
         #     f'\tScheduler:\n{scheduler}\n\n'
         # )
 
-        self.nn_parts = {
-            'loader': {
-                'train': train_loader,
-                'test': test_loader,
-                'scaler_X': scaler_X,
-                'scaler_y': scaler_y,
-            },
-            'model': {
-                'model': model, 
-                'criterion': criterion,
-                'optimizer': optimizer, 
-                'scheduler': scheduler,
-                'device': device,
-            },
-            'Score': {
-                'rmse': float('inf'),
-                'mae': float('inf'),
-                'r2': float('inf'),
-            },
-            'Result': None,
-        }
+        if self.nn_parts == {}:
+            self.nn_parts = {
+                'loader': {
+                    'train': train_loader,
+                    'test': test_loader,
+                    'scaler_X': scaler_X,
+                    'scaler_y': scaler_y,
+                },
+                'model': {
+                    'model': model, 
+                    'criterion': criterion,
+                    'optimizer': optimizer, 
+                    'scheduler': scheduler,
+                    'device': device,
+                },
+                'Score': {
+                    'rmse': float('inf'),
+                    'mae': float('inf'),
+                    'r2': float('inf'),
+                },
+                'Result': None,
+            }
+        else:
+            # loader
+            self.nn_parts['loader']['train'] = train_loader
+            self.nn_parts['loader']['test'] = test_loader
+            self.nn_parts['loader']['scaler_X'] = scaler_X
+            self.nn_parts['loader']['scaler_y'] = scaler_y
+
+            # model
+            self.nn_parts['model']['model'] = model
+            self.nn_parts['model']['criterion'] = criterion
+            self.nn_parts['model']['optimizer'] = optimizer
+            self.nn_parts['model']['scheduler'] = scheduler
+            self.nn_parts['model']['device'] = device
 
     def train(self, ensemble:bool=False):
         """------------------ 1-4) Initrialize Neural Network ------------------"""
@@ -265,16 +279,17 @@ class trainer:
         
         if not ensemble:
             self.save_results()
+        else:
+            print(
+                f'[*] Overall best validation MAE: {self.nn_parts['Score']['mae']:.4f} | RMSE: {self.nn_parts['Score']['rmse']:.4f} | R²: {self.nn_parts['Score']['r2']:.4f}.\n'
+            )
 
     def ensemble_train(self, seeds):
         for i, seed in enumerate(seeds, start=1):
-            print(f"\n\n=== Ensemble Model {i} (Seed: {seed}) ===")
+            print(f"\n=== Ensemble Model {i} (Seed: {seed}) ===")
             self.seed = seed
-            self.train()
-        
-        print(
-            f'\n[*] Training loop complete, best validation MAE: {self.nn_parts['Score']['mae']:.4f} | RMSE: {self.nn_parts['Score']['rmse']:.4f} | R²: {self.nn_parts['Score']['r2']:.4f}.\n'
-        )
+            self.train(ensemble=True)
+
         self.save_results()
 
 
@@ -311,7 +326,8 @@ if __name__ == '__main__':
         out_dir=parser.OUTPUT,
         epochs=parser.EPOCHS,
         batch_size=parser.BATCH_SIZE,
-        lr=parser.LEARNING_RATE
+        lr=parser.LEARNING_RATE,
+        seed=parser.RANDOM_SEED,
     )
 
     if parser.RANDOM_SEED_TEST == 0:
@@ -320,11 +336,20 @@ if __name__ == '__main__':
         # Ensemble training with different seeds
         seeds = np.random.randint(
             low=0, 
-            high=parser.RANDOM_SEED_TEST*10, 
-            size=parser.RANDOM_SEED_TEST
+            high=parser.RANDOM_SEED_TEST*100, 
+            size=parser.RANDOM_SEED_TEST - 1,
         )
 
         if parser.RANDOM_SEED not in seeds:
-            seeds.append(parser.RANDOM_SEED)
+            seeds = np.append(seeds, parser.RANDOM_SEED)
+        else:
+            seeds = np.append(seeds, np.random.randint(
+                                low=0, 
+                                high=parser.RANDOM_SEED_TEST*100, 
+                                size=1,
+                                )
+            )
+        
+        print(f'[*] Enable ensemble training with seeds:\n{seeds}')
 
         trainer.ensemble_train(seeds=seeds)
