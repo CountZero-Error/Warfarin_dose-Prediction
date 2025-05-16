@@ -19,7 +19,7 @@ from torch import nn
 import torch
 
 
-"""================= CLASS ================="""
+"""================================== DATA =================================="""
 # Data wrapper around ndarray
 class WarfarinDataset(Dataset):
     """Tensor-ready wrapper for (X, y) numpy arrays."""
@@ -34,6 +34,8 @@ class WarfarinDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
+
+"""================================== NEURAL NETWORK =================================="""
 # Feed Forward Neural Network
 class FeedForwardNN(nn.Module):
     def __init__(self, in_dim: int):
@@ -61,128 +63,219 @@ class FeedForwardNN(nn.Module):
         return self.NN(x)
 
 
-"""================= TRAINER ================="""
-# Configure
-MODEL_WEIGHTS: str = 'best_nn.pt'  # where to save checkpointed weights
-SCALER_FILE: str = 'scaler.pkl'    # where to save fitted StandardScaler
-RANDOM_STATE: int = 42
-TEST_SIZE: float = 0.2
+"""================================== TRAINER =================================="""
+class trainer:
+    def __init__(self, df:pd.DataFrame, target_col:str, out_dir:str, epochs:int=100, batch_size:int=64, lr:float=1e-3, seed:int=42):
+        # Configure
+        self.MODEL_WEIGHTS: str = 'best_nn.pt'  # where to save checkpointed weights
+        self.SCALER_FILE: str = 'scaler.pkl'    # where to save fitted StandardScaler
+        self.TEST_SIZE: float = 0.2
 
-def train(df:pd.DataFrame, target_col:str, out_dir:str, epochs:int=100, batch_size:int=64, lr:float=1e-3):
-    """------------------ 1) Load data ------------------"""
-    print('[*] Loading data...')
-    # Split dataset into features and target
-    X = df.drop(columns=[target_col]).values.astype(np.float32)
-    y = df[target_col].values.astype(np.float32)
+        # Parameters
+        self.df = df
+        self.target_col = target_col
+        self.out_dir = out_dir
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.lr = lr
+        self.seed = seed
 
-    # Train:Test -> 8:2
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-    )
-
-    """"------------------ 2) Fit scaler ------------------"""
-    print('[*] Scaling features...')
-    scaler = StandardScaler()
-    # scaler = MinMaxScaler()
-
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.fit_transform(X_test)
-
-    # Persist scaler to re‑use at inference time
-    if not os.path.exists(out_dir):
-        os.mkdir(out_dir)
-
-    with open(os.path.join(out_dir, SCALER_FILE), 'wb') as filo:
-        pickle.dump(scaler, filo)
+        # Variables
+        self.nn_parts = {}
     
-    """------------------ 3) Build datasets/loaders ------------------"""
-    print('[*] Wrapping train/test datasets...')
-    train_ds = WarfarinDataset(X_train_scaled, y_train)
-    test_ds = WarfarinDataset(X_test_scaled, y_test)
+    def __items__(self) -> Dict:
+        return self.nn_parts
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+    def save_results(self):
+        # Scaler
+        if not os.path.exists(self.out_dir):
+            os.mkdir(self.out_dir)
 
-    """------------------ 4) Model/optimiser ------------------"""
-    print('[*] Initializing neural network...')
-    device = torch.device('cuda' if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-    print(f'\tUsing {device}.')
-
-    model = FeedForwardNN(X_train.shape[1]).to(device)
-    print(f'\tModel:\n{model}\n')
-
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.AdamW(params=model.parameters(), lr=lr, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=10, factor=0.5)
-    print(
-        f'\tCirterion:\n{criterion}\n\n'
-        f'\tOptimizer:\n{optimizer}\n\n'
-        f'\tScheduler:\n{scheduler}\n\n'
-    )
-
-    """------------------ 5) Training loop ------------------"""
-    print(f'[*] Start training({epochs} epochs):')
-    best_test_rmse = float('inf')
-    best_test_mae = float('inf')
-    best_test_r2 = float('inf')
-
-    for epoch in range(1, epochs + 1):
-        # ---- train ----
-        model.train()
-        train_losses: List[float] = []
-        for x_batch, y_batch in train_loader:
-            x_batch, y_batch = x_batch.to(device), y_batch.to(device)
-            
-            optimizer.zero_grad()
-            y_preds = model(x_batch)
-            loss = criterion(y_preds, y_batch)
-            loss.backward()
-            optimizer.step()
-            
-            train_losses.append(loss.item())
+        with open(os.path.join(self.out_dir, f'X{self.SCALER_FILE}'), 'wb') as filo:
+            pickle.dump(self.nn_parts['loader']['scaler_X'], filo)
         
-        # ---- test ----
-        model.eval()
-        test_losses: List[float] = []
-        test_preds, test_targets = [], []
-        with torch.no_grad():
-            for x_batch, y_batch in test_loader:
+        with open(os.path.join(self.out_dir, f'y{self.SCALER_FILE}'), 'wb') as filo:
+            pickle.dump(self.nn_parts['loader']['scaler_y'], filo)
+        
+        # Model
+        torch.save(self.nn_parts['Result'].state_dict(), os.path.join(self.out_dir, self.MODEL_WEIGHTS))
+
+        print(
+            f'[*] Model saved to {self.MODEL_WEIGHTS}\n'
+            f'[*] Scaler saved to X{self.SCALER_FILE}/y{self.SCALER_FILE}'
+        )
+
+    def initrialize(self):
+        """------------------ 1) Load data ------------------"""
+        print('[*] Loading data...')
+        # Split dataset into features and target
+        X = df.drop(columns=[self.target_col]).values.astype(np.float32)
+        scaler_y = StandardScaler()
+        y = scaler_y.fit_transform(df[[self.target_col]].values.astype(np.float32)).squeeze()
+
+        # Train:Test -> 8:2
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=self.TEST_SIZE,
+            random_state=self.seed,
+        )
+
+        """"------------------ 2) Fit scaler ------------------"""
+        print('[*] Scaling features...')
+        scaler_X = StandardScaler()
+
+        X_train_scaled = scaler_X.fit_transform(X_train)
+        X_test_scaled = scaler_X.transform(X_test)
+        
+        """------------------ 3) Build datasets/loaders ------------------"""
+        print('[*] Wrapping train/test datasets...')
+        train_ds = WarfarinDataset(X_train_scaled, y_train)
+        test_ds = WarfarinDataset(X_test_scaled, y_test)
+
+        train_loader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True)
+        test_loader = DataLoader(test_ds, batch_size=self.batch_size, shuffle=False)
+
+        """------------------ 4) Model/optimiser ------------------"""
+        print('[*] Initializing neural network...')
+        device = torch.device('cuda' if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        print(f'\tUsing {device}.')
+
+        model = FeedForwardNN(X_train.shape[1]).to(device)
+        print(f'\tModel:\n{model}\n')
+
+        criterion = nn.MSELoss()
+        optimizer = torch.optim.AdamW(params=model.parameters(), lr=self.lr, weight_decay=1e-5)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=10, factor=0.5)
+        # print(
+        #     f'\tCirterion:\n{criterion}\n\n'
+        #     f'\tOptimizer:\n{optimizer}\n\n'
+        #     f'\tScheduler:\n{scheduler}\n\n'
+        # )
+
+        self.nn_parts = {
+            'loader': {
+                'train': train_loader,
+                'test': test_loader,
+                'scaler_X': scaler_X,
+                'scaler_y': scaler_y,
+            },
+            'model': {
+                'model': model, 
+                'criterion': criterion,
+                'optimizer': optimizer, 
+                'scheduler': scheduler,
+                'device': device,
+            },
+            'Score': {
+                'rmse': float('inf'),
+                'mae': float('inf'),
+                'r2': float('inf'),
+            },
+            'Result': None,
+        }
+
+    def train(self, ensemble:bool=False):
+        """------------------ 1-4) Initrialize Neural Network ------------------"""
+        self.initrialize()
+
+        train_loader = self.nn_parts['loader']['train']
+        test_loader = self.nn_parts['loader']['test']
+        scaler_y = self.nn_parts['loader']['scaler_y']
+
+        model = self.nn_parts['model']['model']
+        criterion = self.nn_parts['model']['criterion']
+        optimizer = self.nn_parts['model']['optimizer']
+        scheduler = self.nn_parts['model']['scheduler']
+        device = self.nn_parts['model']['device']
+
+        """------------------ 5) Training loop ------------------"""
+        print(f'[*] Start training({self.epochs} epochs):')
+        best_test_rmse = float('inf')
+        best_test_mae = float('inf')
+        best_test_r2 = float('inf')
+        best_model = None
+
+        for epoch in range(1, self.epochs + 1):
+            # ---- train ----
+            model.train()
+            train_losses: List[float] = []
+            for x_batch, y_batch in train_loader:
                 x_batch, y_batch = x_batch.to(device), y_batch.to(device)
                 
+                optimizer.zero_grad()
                 y_preds = model(x_batch)
                 loss = criterion(y_preds, y_batch)
+                loss.backward()
+                optimizer.step()
                 
-                test_losses.append(loss.item())
-                test_preds.append(y_preds.cpu().numpy())
-                test_targets.append(y_batch.cpu().numpy())
-        
-        test_preds_np = np.concatenate(test_preds).squeeze()
-        test_targets_np = np.concatenate(test_targets).squeeze()
-        test_rmse = rmse(test_targets_np, test_preds_np)
-        test_mae = mae(test_targets_np, test_preds_np)
-        test_r2 = r2(test_targets_np, test_preds_np)
-        
-        print(f'\r\tEpoch {epoch:03d}: Train MSE = {np.mean(train_losses):.4f} | Test RMSE = {test_rmse:.4f} | Test MAE = {test_mae:.4f} | Test R² = {test_r2:.4f}        ', end='')
+                train_losses.append(loss.item())
+            
+            # ---- test ----
+            model.eval()
+            test_losses: List[float] = []
+            test_preds, test_targets = [], []
+            with torch.no_grad():
+                for x_batch, y_batch in test_loader:
+                    x_batch, y_batch = x_batch.to(device), y_batch.to(device)
+                    
+                    y_preds = model(x_batch)
+                    loss = criterion(y_preds, y_batch)
+                    
+                    test_losses.append(loss.item())
+                    test_preds.append(y_preds.cpu().numpy())
+                    test_targets.append(y_batch.cpu().numpy())
+            
+            test_preds_np = scaler_y.inverse_transform(np.concatenate(test_preds).squeeze().reshape(-1, 1)).squeeze()
+            test_targets_np = scaler_y.inverse_transform(np.concatenate(test_targets).squeeze().reshape(-1, 1)).squeeze()
+            test_rmse = rmse(test_targets_np, test_preds_np)
+            test_mae = mae(test_targets_np, test_preds_np)
+            test_r2 = r2(test_targets_np, test_preds_np)
+            
+            print(f'\r\tEpoch {epoch:03d}: Train MSE = {np.mean(train_losses):.4f} | Test RMSE = {test_rmse:.4f} | Test MAE = {test_mae:.4f} | Test R² = {test_r2:.4f}        ', end='')
 
-        # Plateau scheduler – auto LR decay if progress stalls
-        scheduler.step(test_rmse)
+            # Plateau scheduler – auto LR decay if progress stalls
+            scheduler.step(test_rmse)
 
-        # Checkpoint if this epoch is best so far
-        if test_mae < best_test_mae:
-            best_test_rmse = test_rmse
-            best_test_mae = test_mae
-            best_test_r2 = test_r2
+            # Checkpoint if this epoch is best so far
+            if test_mae < best_test_mae:
+                best_test_rmse = test_rmse
+                best_test_mae = test_mae
+                best_test_r2 = test_r2
 
-            torch.save(model.state_dict(), os.path.join(out_dir, MODEL_WEIGHTS))
+                best_model = model
+                # torch.save(model.state_dict(), os.path.join(out_dir, MODEL_WEIGHTS))
+            
+        """------------------ 6) Done ------------------"""
+        print(
+            f'\n[*] Training complete, best validation MAE: {best_test_mae:.4f} | RMSE: {best_test_rmse:.4f} | R²: {best_test_r2:.4f}.\n'
+        )
+
+        if best_test_mae < self.nn_parts['Score']['mae']:
+            self.nn_parts['Score']['mae'] = best_test_mae
+            self.nn_parts['Score']['rmse'] = best_test_rmse
+            self.nn_parts['Score']['r2'] = best_test_r2
+            self.nn_parts['Result'] = best_model
         
-    """------------------ 6) Done ------------------"""
-    print(
-        f'\n[*] Training complete, best validation MAE: {best_test_mae:.4f} | RMSE: {best_test_rmse:.4f} | R²: {best_test_r2:.4f}.\n'
-        f'[*] Model saved to {MODEL_WEIGHTS}\n'
-        f'[*] Scaler saved to {SCALER_FILE}'
-    )
+        elif best_test_mae == self.nn_parts['Score']['mae']:
+            if best_test_rmse < self.nn_parts['Score']['rmse']:
+                self.nn_parts['Score']['mae'] = best_test_mae
+                self.nn_parts['Score']['rmse'] = best_test_rmse
+                self.nn_parts['Score']['r2'] = best_test_r2
+                self.nn_parts['Result'] = best_model
+        
+        if not ensemble:
+            self.save_results()
+
+    def ensemble_train(self, seeds):
+        for i, seed in enumerate(seeds, start=1):
+            print(f"\n\n=== Ensemble Model {i} (Seed: {seed}) ===")
+            self.seed = seed
+            self.train()
+        
+        print(
+            f'\n[*] Training loop complete, best validation MAE: {self.nn_parts['Score']['mae']:.4f} | RMSE: {self.nn_parts['Score']['rmse']:.4f} | R²: {self.nn_parts['Score']['r2']:.4f}.\n'
+        )
+        self.save_results()
 
 
 Description = \
@@ -206,15 +299,32 @@ if __name__ == '__main__':
     args.add_argument('-E', '--EPOCHS', type=int, default=100, help='Epochs for training neural network, default is 100.')
     args.add_argument('-BS', '--BATCH_SIZE', type=int, default=64, help='Batch size for each round training, default is 64.')
     args.add_argument('-LR', '--LEARNING_RATE', type=float, default=1e-3, help='Learning rate for training neural network, default is 1e-3.')
+    args.add_argument('-RS', '--RANDOM_SEED', type=int, default=42, help='Random seed for dataset train/test split, default is 42.')
+    args.add_argument('-RST', '--RANDOM_SEED_TEST', type=int, default=0, help='Random seed test will test multiple seeds to find out a best model, enter the number of seeds you wish to test, default is 0.')
 
     parser = args.parse_args()
 
     df = pd.read_csv(parser.INPUT, sep=parser.SEPARATOR)
-    train(
+    trainer = trainer(
         df=df,
         target_col=parser.KEY.strip('"'),
-        out_dir = parser.OUTPUT,
+        out_dir=parser.OUTPUT,
         epochs=parser.EPOCHS,
         batch_size=parser.BATCH_SIZE,
         lr=parser.LEARNING_RATE
     )
+
+    if parser.RANDOM_SEED_TEST == 0:
+        trainer.train()
+    else:
+        # Ensemble training with different seeds
+        seeds = np.random.randint(
+            low=0, 
+            high=parser.RANDOM_SEED_TEST*10, 
+            size=parser.RANDOM_SEED_TEST
+        )
+
+        if parser.RANDOM_SEED not in seeds:
+            seeds.append(parser.RANDOM_SEED)
+
+        trainer.ensemble_train(seeds=seeds)
