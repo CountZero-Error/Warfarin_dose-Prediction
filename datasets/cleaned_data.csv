@@ -794,7 +794,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 182.8799999998025,152.3,2.17,0.0,0.0,0.0,0.0,0.0,0.0,0.0,52.5,False,False,False,False,False,False,False,False,False,True,False,False,False,True,False,False,False,False,False
 157.47999999982991,73.6,2.8,0.0,1.0,0.0,0.0,0.0,0.0,0.0,10.0,False,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False
 167.63999999981897,90.0,3.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,40.0,False,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False
-175.25999999981073,207.7,2.8,0.0,1.0,0.0,0.0,0.0,0.0,0.0,115.0,False,False,False,False,False,False,False,False,False,True,False,False,True,False,False,False,False,False,False
 193.03999999979152,109.1,2.2,1.0,1.0,0.0,0.0,0.0,0.0,0.0,42.5,False,False,True,False,False,False,False,False,False,True,True,False,False,False,True,False,False,False,False
 162.55999999982444,106.8,2.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,25.0,False,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False
 190.49999999979426,136.4,2.16,0.0,0.0,0.0,0.0,0.0,0.0,0.0,55.0,False,False,False,False,False,False,False,False,False,True,True,False,False,False,False,True,False,False,False
@@ -844,7 +843,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 154.93999999983268,90.5,2.2,0.0,0.0,0.0,0.0,0.0,0.0,0.0,22.5,False,False,False,False,False,False,False,False,True,False,False,False,True,False,False,False,False,False,False
 170.1799999998162,72.3,2.6,0.0,1.0,0.0,0.0,0.0,0.0,0.0,42.5,False,False,False,False,False,False,False,False,False,True,True,False,False,False,False,False,False,True,False
 175.25999999981073,81.8,2.9,0.0,1.0,0.0,0.0,0.0,0.0,0.0,45.0,False,False,True,False,False,False,False,False,True,False,True,False,False,False,True,False,False,False,False
-177.799999999808,125.0,2.5,0.0,0.0,0.0,1.0,0.0,0.0,0.0,115.0,False,False,False,False,False,False,False,False,False,True,False,True,False,False,False,False,False,False,False
 162.55999999982444,68.2,2.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,17.5,False,False,False,False,False,False,False,False,False,True,False,False,True,False,False,False,False,False,False
 190.49999999979426,117.7,2.2,1.0,0.0,0.0,0.0,0.0,0.0,0.0,45.0,False,False,False,False,False,False,False,False,True,False,True,False,False,True,False,False,False,False,False
 172.71999999981347,73.6,2.55,1.0,0.0,0.0,0.0,0.0,0.0,0.0,17.5,False,False,False,False,False,False,False,False,True,False,True,False,False,False,False,True,False,False,False
@@ -885,7 +883,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 165.0999999998217,56.4,2.4,0.0,0.0,0.0,0.0,0.0,0.0,0.0,25.5,False,False,True,False,False,False,False,False,True,False,False,False,False,False,False,False,True,False,False
 180.33999999980523,113.6,2.34,0.0,1.0,0.0,0.0,0.0,0.0,0.0,40.0,False,False,False,False,False,False,False,False,True,False,True,False,False,False,False,True,False,False,False
 170.1799999998162,120.5,2.7,0.0,0.0,0.0,0.0,0.0,0.0,0.0,30.0,False,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False
-170.1799999998162,63.6,2.78,0.0,0.0,0.0,0.0,1.0,0.0,1.0,230.0,False,False,False,False,False,False,False,False,False,True,True,False,False,True,False,False,False,False,False
 167.63999999981897,93.2,2.1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,35.0,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,True,False,False,False
 160.01999999982718,68.2,2.3,0.0,1.0,0.0,0.0,0.0,0.0,0.0,40.0,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,True
 182.8799999998025,86.4,2.4,0.0,1.0,1.0,0.0,0.0,0.0,0.0,15.0,False,False,True,False,False,False,False,False,False,True,True,False,False,False,False,False,True,False,False
@@ -943,7 +940,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 172.71999999981347,101.4,2.4,0.0,0.0,0.0,0.0,0.0,0.0,0.0,35.0,False,False,False,False,False,False,False,False,True,False,True,False,False,True,False,False,False,False,False
 172.71999999981347,97.7,2.3,0.0,1.0,0.0,0.0,0.0,0.0,1.0,16.0,False,False,False,False,False,False,True,False,True,False,True,False,True,False,False,False,False,False,False
 172.71999999981347,81.8,2.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,52.5,False,False,False,False,False,False,False,False,False,True,False,False,True,False,False,False,False,False,False
-187.95999999979702,114.5,2.47,0.0,0.0,0.0,0.0,0.0,0.0,0.0,105.0,False,False,False,False,False,False,False,False,False,True,True,False,False,False,True,False,False,False,False
 170.1799999998162,71.8,2.6,0.0,0.0,0.0,0.0,0.0,0.0,0.0,20.0,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,True,False
 177.799999999808,74.5,2.59,0.0,0.0,0.0,0.0,0.0,0.0,0.0,40.0,False,False,True,False,False,False,False,False,True,False,True,False,False,False,True,False,False,False,False
 165.0999999998217,52.7,2.6,0.0,0.0,0.0,0.0,0.0,0.0,0.0,20.0,False,False,True,False,False,False,False,False,True,False,False,False,False,False,False,True,False,False,False
@@ -969,7 +965,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 167.63999999981897,95.5,2.6,0.0,0.0,0.0,0.0,0.0,0.0,0.0,27.5,False,False,True,False,False,False,False,False,True,False,False,False,False,False,True,False,False,False,False
 177.799999999808,85.9,2.15,1.0,0.0,0.0,0.0,0.0,0.0,0.0,42.5,False,False,False,False,False,False,False,False,False,True,True,False,False,True,False,False,False,False,False
 162.55999999982444,75.5,2.4,0.0,0.0,0.0,0.0,0.0,0.0,0.0,25.0,False,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False
-162.55999999982444,56.8,2.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,105.0,False,False,False,False,False,False,False,False,False,True,False,True,False,False,False,False,False,False,False
 162.55999999982444,64.5,3.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,55.0,False,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False
 182.8799999998025,77.3,2.6,0.0,0.0,0.0,0.0,0.0,0.0,0.0,30.0,False,False,False,False,False,False,False,False,True,False,True,False,False,False,False,False,True,False,False
 170.1799999998162,118.2,2.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,41.25,False,False,False,False,False,False,False,False,True,False,True,False,False,False,True,False,False,False,False
@@ -982,7 +977,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 180.33999999980523,76.8,2.1,0.0,1.0,1.0,0.0,0.0,0.0,0.0,42.5,False,False,False,True,False,False,False,False,False,True,True,False,False,False,False,True,False,False,False
 190.49999999979426,81.8,2.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,57.5,False,False,False,False,False,False,False,False,False,True,True,False,False,False,True,False,False,False,False
 180.33999999980523,95.5,2.6,0.0,1.0,0.0,0.0,0.0,0.0,0.0,47.5,False,False,False,False,False,False,False,False,False,True,True,False,False,False,False,False,True,False,False
-162.55999999982444,72.7,2.4,1.0,0.0,0.0,0.0,0.0,0.0,0.0,110.0,False,False,False,False,False,False,False,False,False,True,False,False,True,False,False,False,False,False,False
 185.41999999979976,131.4,2.76,0.0,1.0,0.0,0.0,0.0,0.0,0.0,65.0,False,False,False,False,False,False,False,False,False,True,True,False,False,False,True,False,False,False,False
 172.71999999981347,84.1,2.7,0.0,0.0,0.0,0.0,0.0,0.0,0.0,40.0,False,False,False,False,False,False,False,False,False,True,True,False,False,False,False,True,False,False,False
 152.39999999983542,95.5,2.51,0.0,1.0,0.0,0.0,0.0,0.0,0.0,15.0,False,False,False,False,False,False,False,False,True,False,True,False,False,False,False,False,False,True,False
@@ -1111,7 +1105,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 179.98439999980562,65.0,2.48,1.0,0.0,0.0,0.0,0.0,0.0,0.0,45.5,False,False,False,True,False,False,False,False,True,False,True,True,False,False,False,False,False,False,False
 191.99859999979265,108.0,2.46,1.0,0.0,0.0,0.0,0.0,0.0,0.0,40.0,False,False,False,False,False,False,False,False,True,False,True,False,False,True,False,False,False,False,False
 170.0021999998164,83.0,2.87,0.0,0.0,0.0,0.0,0.0,0.0,0.0,87.5,False,False,False,False,False,False,False,False,True,False,False,True,False,False,False,False,False,False,False
-172.99939999981316,69.0,2.29,0.0,0.0,0.0,0.0,0.0,0.0,0.0,157.5,False,False,False,False,False,False,False,False,False,True,True,False,False,False,False,False,False,True,False
 159.99459999982722,70.0,2.34,0.0,0.0,1.0,0.0,0.0,0.0,0.0,40.0,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False,False
 164.9983999998218,70.0,2.57,0.0,1.0,0.0,0.0,0.0,0.0,0.0,87.5,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,True,False,False
 164.9983999998218,103.5,2.37,0.0,0.0,0.0,0.0,0.0,0.0,0.0,87.5,False,False,True,False,False,False,False,False,False,True,False,False,False,False,False,False,True,False,False
@@ -1184,8 +1177,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 189.9919999997948,93.0,2.44,0.0,0.0,0.0,0.0,0.0,0.0,0.0,77.0,False,False,False,False,False,False,False,False,True,False,True,False,False,False,True,False,False,False,False
 181.00039999980453,90.0,2.46,0.0,0.0,0.0,0.0,0.0,0.0,0.0,38.5,False,False,False,False,False,False,False,False,True,False,True,True,False,False,False,False,False,False,False
 178.00319999980775,92.0,2.32,0.0,0.0,0.0,0.0,0.0,0.0,0.0,21.0,False,False,True,False,False,False,False,False,False,False,True,False,False,False,False,False,True,False,False
-148.00579999984018,71.0,2.16,0.0,0.0,0.0,0.0,0.0,0.0,0.0,315.0,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False,False
-183.00699999980236,113.0,2.42,0.0,1.0,0.0,0.0,0.0,0.0,0.0,122.5,False,False,False,False,False,False,False,False,False,True,True,False,False,True,False,False,False,False,False
 175.00599999981102,102.0,2.56,1.0,0.0,0.0,0.0,0.0,0.0,0.0,63.0,False,False,True,False,False,False,False,False,False,True,True,False,False,True,False,False,False,False,False
 170.0021999998164,80.0,2.3,1.0,0.0,0.0,0.0,0.0,0.0,0.0,70.0,False,False,False,True,False,False,False,False,False,True,True,False,False,True,False,False,False,False,False
 170.0021999998164,80.0,2.85,0.0,0.0,0.0,0.0,0.0,0.0,0.0,70.0,False,False,False,False,False,True,False,False,False,True,False,False,True,False,False,False,False,False,False
@@ -1199,7 +1190,6 @@ Height (cm),Weight (kg),INR on Reported Therapeutic Dose of Warfarin,Current Smo
 159.99459999982722,75.0,2.84,0.0,0.0,0.0,0.0,0.0,0.0,0.0,28.0,False,False,False,False,False,False,False,False,True,False,False,False,False,True,False,False,False,False,False
 159.99459999982722,72.0,2.51,0.0,0.0,0.0,0.0,0.0,0.0,0.0,28.0,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,True,False,False,False
 170.0021999998164,56.0,2.32,0.0,0.0,0.0,0.0,0.0,0.0,0.0,24.5,False,False,False,False,False,False,True,False,False,True,True,False,False,False,False,False,False,False,False
-149.98699999983802,52.0,2.25,0.0,0.0,0.0,0.0,0.0,0.0,0.0,122.5,False,False,False,False,False,False,False,False,False,True,False,False,False,False,False,False,True,False,False
 178.00319999980775,106.0,2.57,0.0,0.0,0.0,0.0,0.0,0.0,0.0,31.5,False,False,False,True,False,False,False,False,True,False,True,False,False,False,True,False,False,False,False
 157.98799999982938,70.0,2.22,0.0,1.0,0.0,0.0,0.0,0.0,0.0,49.0,False,False,True,False,False,False,False,False,True,False,False,False,False,False,False,False,False,True,False
 159.99459999982722,59.0,2.18,0.0,0.0,0.0,0.0,0.0,0.0,0.0,49.0,False,False,True,False,False,False,False,False,False,True,False,False,False,True,False,False,False,False,False
