@@ -174,6 +174,7 @@ class trainer:
                     'r2': float('inf'),
                 },
                 'Result': None,
+                'Seed': 0,
             }
         else:
             # loader
@@ -263,7 +264,7 @@ class trainer:
             
         """------------------ 6) Done ------------------"""
         print(
-            f'\n[*] Training complete, best validation MAE: {best_test_mae:.4f} | RMSE: {best_test_rmse:.4f} | R²: {best_test_r2:.4f}.\n'
+            f'\n[*] Training complete, best validation RMSE: {best_test_rmse:.4f} | MAE: {best_test_mae:.4f} | R²: {best_test_r2:.4f}.\n'
         )
 
         if best_test_mae < self.nn_parts['Score']['mae']:
@@ -271,6 +272,7 @@ class trainer:
             self.nn_parts['Score']['rmse'] = best_test_rmse
             self.nn_parts['Score']['r2'] = best_test_r2
             self.nn_parts['Result'] = best_model
+            self.nn_parts['Seed'] = self.seed
         
         elif best_test_mae == self.nn_parts['Score']['mae']:
             if best_test_rmse < self.nn_parts['Score']['rmse']:
@@ -278,12 +280,13 @@ class trainer:
                 self.nn_parts['Score']['rmse'] = best_test_rmse
                 self.nn_parts['Score']['r2'] = best_test_r2
                 self.nn_parts['Result'] = best_model
+                self.nn_parts['Seed'] = self.seed
         
         if not ensemble:
             self.save_results()
         else:
             print(
-                f'[*] Overall best validation MAE: {self.nn_parts['Score']['mae']:.4f} | RMSE: {self.nn_parts['Score']['rmse']:.4f} | R²: {self.nn_parts['Score']['r2']:.4f}.\n'
+                f'[*] Overall best validation RMSE: {self.nn_parts['Score']['rmse']:.4f} | MAE: {self.nn_parts['Score']['mae']:.4f} | R²: {self.nn_parts['Score']['r2']:.4f} | Seed: {self.nn_parts['Seed']}.\n'
             )
 
     def ensemble_train(self, seeds):
