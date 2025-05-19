@@ -307,8 +307,6 @@ Description = \
     '''
 
 if __name__ == '__main__':
-    prayer().toPray()
-
     args = argparse.ArgumentParser("""""")
     args.add_argument('-I', '--INPUT', type=str, required=True, help="csv file used for training neural network.")
     args.add_argument('-S', '--SEPARATOR', type=str, default=',', help='Delimiter for input csv file, default is ",".')
@@ -332,6 +330,8 @@ if __name__ == '__main__':
         lr=parser.LEARNING_RATE,
         seed=parser.RANDOM_SEED,
     )
+
+    prayer().toPray()
 
     if parser.RANDOM_SEED_TEST == 0:
         trainer.train()
