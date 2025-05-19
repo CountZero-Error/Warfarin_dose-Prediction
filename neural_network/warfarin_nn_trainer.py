@@ -252,7 +252,8 @@ class trainer:
             scheduler.step(test_rmse)
 
             # Checkpoint if this epoch is best so far
-            if test_mae < best_test_mae:
+            # if test_mae < best_test_mae:
+            if test_rmse < best_test_rmse:
                 best_test_rmse = test_rmse
                 best_test_mae = test_mae
                 best_test_r2 = test_r2

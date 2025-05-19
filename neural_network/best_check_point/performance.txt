@@ -1,4 +1,4 @@
-=== Ensemble Model 5 (Seed: 638) ===
+=== Ensemble Model 34 (Seed: 4437) ===
 [*] Loading data...
 [*] Scaling features...
 [*] Wrapping train/test datasets...
@@ -17,5 +17,7 @@ FeedForwardNN(
 )
 
 [*] Start training(300 epochs):
-	Epoch 300: Train MSE = 0.5271 | Test RMSE = 11.0727 | Test MAE = 8.5934 | Test R² = 0.4264         
-[*] Training complete, best validation MAE: 8.2526 | RMSE: 10.8596 | R²: 0.4482.
+	Epoch 300: Train MSE = 0.5307 | Test RMSE = 10.7034 | Test MAE = 7.9972 | Test R² = 0.4672        
+[*] Training complete, best validation MAE: 7.6857 | RMSE: 10.6776 | R²: 0.4697.
+
+[*] Overall best validation MAE: 7.6857 | RMSE: 10.6776 | R²: 0.4697.
