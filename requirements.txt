@@ -2,6 +2,7 @@
 numpy
 pandas
 matplotlib
+OmnissiahPrayer
 
 # Machine Learning
 scikit-learn
