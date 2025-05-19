@@ -1,4 +1,5 @@
 from typing import Dict, List
+from Prayer import prayer
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -306,6 +307,8 @@ Description = \
     '''
 
 if __name__ == '__main__':
+    prayer().toPray()
+
     args = argparse.ArgumentParser("""""")
     args.add_argument('-I', '--INPUT', type=str, required=True, help="csv file used for training neural network.")
     args.add_argument('-S', '--SEPARATOR', type=str, default=',', help='Delimiter for input csv file, default is ",".')
