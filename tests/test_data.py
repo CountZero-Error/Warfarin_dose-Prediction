@@ -1,5 +1,6 @@
 from io import BytesIO
 
+import numpy as np
 import pytest
 
 from warfarin_dose import data
@@ -72,3 +73,72 @@ def test_download_data_command_uses_downloader_without_network(monkeypatch, caps
 
     assert cli.main(["download-data", "--output", "custom.xls"]) == 0
     assert capsys.readouterr().out == "verified verified at custom.xls\n"
+
+
+def test_cohort_uses_stable_positive_weekly_dose_and_site(raw_frame):
+    raw = raw_frame.copy()
+    raw.loc[0, "Subject Reached Stable Dose of Warfarin"] = 0
+    raw.loc[1, "Therapeutic Dose of Warfarin"] = -1
+    raw.loc[2, "Project Site"] = np.nan
+
+    cohort = data.prepare_cohort(raw)
+
+    assert len(cohort.data) == len(raw) - 3
+    assert set(cohort.exclusions["reason"]) == {"not_stable", "invalid_target", "missing_site"}
+    assert cohort.data["weekly_dose_mg"].gt(0).all()
+    assert cohort.data["row_key"].is_unique
+    assert "PharmGKB Subject ID" not in cohort.exclusions.columns
+
+
+def test_unusual_positive_dose_is_audited_not_removed(raw_frame):
+    raw = raw_frame.copy()
+    raw.loc[0, "Therapeutic Dose of Warfarin"] = 315.0
+
+    cohort = data.prepare_cohort(raw)
+
+    assert 315.0 in cohort.data["weekly_dose_mg"].to_numpy()
+    assert cohort.issues.set_index("issue").loc["dose_above_200_mg_week", "count"] == 1
+
+
+def test_required_schema_change_stops(raw_frame):
+    with pytest.raises(ValueError, match="missing required IWPC columns"):
+        data.prepare_cohort(raw_frame.drop(columns=["Project Site"]))
+
+
+def test_audit_includes_hashed_exclusions_and_genotype_label_tables(raw_frame):
+    raw = raw_frame.copy()
+    raw.loc[0, "Subject Reached Stable Dose of Warfarin"] = 0
+    raw.loc[1, "CYP2C9 consensus"] = "not-a-cyp2c9-label"
+    raw.loc[2, "VKORC1 -1639 consensus"] = "not-a-vkorc1-label"
+
+    tables = data.build_audit(raw, data.prepare_cohort(raw))
+
+    assert "PharmGKB Subject ID" not in tables["exclusions"].columns
+    assert tables["cyp2c9_observed_labels"]["count"].sum() == len(raw) - 1
+    assert tables["vkorc1_observed_labels"]["count"].sum() == len(raw) - 1
+    assert tables["cyp2c9_invalid_labels"].to_dict("records") == [
+        {"label": "not-a-cyp2c9-label", "count": 1}
+    ]
+    assert tables["vkorc1_invalid_labels"].to_dict("records") == [
+        {"label": "not-a-vkorc1-label", "count": 1}
+    ]
+
+
+def test_audit_data_command_prints_counts_and_output_path(monkeypatch, capsys):
+    from warfarin_dose import cli
+
+    monkeypatch.setattr(
+        cli,
+        "write_audit",
+        lambda raw_path, output_dir: {
+            "source_rows": 48,
+            "eligible_rows": 45,
+            "sites": 6,
+            "source_sha256": "not-printed",
+        },
+    )
+
+    assert cli.main(["audit-data", "--input", "source.xls", "--output", "audit-output"]) == 0
+    assert capsys.readouterr().out == (
+        "source_rows: 48\neligible_rows: 45\nsites: 6\noutput: audit-output\n"
+    )
