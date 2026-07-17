@@ -45,6 +45,11 @@ def download_data(
                 f"IWPC checksum changed: expected {expected_sha256}, observed {checksum}. "
                 "Review and explicitly update the dataset version before continuing."
             )
+        size_bytes = partial.stat().st_size
+        if expected_size is not None and size_bytes != expected_size:
+            raise ValueError(
+                f"IWPC file size changed: expected {expected_size}, observed {size_bytes}"
+            )
         partial.replace(destination)
     except BaseException:
         partial.unlink(missing_ok=True)
@@ -55,14 +60,9 @@ def download_data(
         "resolved_url": resolved_url,
         "retrieved_at_utc": datetime.now(UTC).isoformat(),
         "path": str(destination),
-        "size_bytes": destination.stat().st_size,
+        "size_bytes": size_bytes,
         "sha256": expected_sha256,
     }
-    if expected_size is not None and manifest["size_bytes"] != expected_size:
-        destination.unlink(missing_ok=True)
-        raise ValueError(
-            f"IWPC file size changed: expected {expected_size}, observed {manifest['size_bytes']}"
-        )
     destination.with_suffix(destination.suffix + ".manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
