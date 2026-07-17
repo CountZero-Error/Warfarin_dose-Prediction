@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .data import RAW_PATH, download_data, read_raw, sha256_file, write_audit
@@ -13,6 +14,7 @@ from .evaluation import (
     run_primary_experiment,
     run_random_cv_frame,
 )
+from .reporting import build_report, predict_patient
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     experiment.add_argument("--input", type=str, default=str(RAW_PATH))
     experiment.add_argument("--output", type=str, default="artifacts/run")
     experiment.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    report = commands.add_parser("build-report", help="build a deterministic research report")
+    report.add_argument("--run-dir", type=str, required=True)
+    predict = commands.add_parser("predict", help="make a research-only dose estimate")
+    predict.add_argument("--model", type=str, required=True)
+    predict.add_argument("--input", type=str, required=True)
     return parser
 
 
@@ -72,5 +79,15 @@ def main(argv: list[str] | None = None) -> int:
             }
             output = runners[args.analysis]()
         print(f"output: {output}")
+        return 0
+    if args.command == "build-report":
+        print(build_report(Path(args.run_dir)))
+        return 0
+    if args.command == "predict":
+        print(
+            json.dumps(
+                predict_patient(Path(args.model), Path(args.input)), indent=2, sort_keys=True
+            )
+        )
         return 0
     raise AssertionError(f"unhandled command: {args.command}")
