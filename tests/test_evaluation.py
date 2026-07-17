@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -17,6 +19,74 @@ from warfarin_dose.evaluation import (
 )
 from warfarin_dose.features import build_feature_frame
 from warfarin_dose.models import ModelSpec
+
+
+def rank_feature_blocks_for_encoded_test_matrix(seed: int) -> None:
+    from warfarin_dose import evaluation
+
+    n_rows = 12
+    evaluation.rank_feature_blocks(
+        pd.DataFrame(
+            {
+                "age_decade": np.repeat([5.0, 6.0, 7.0], 4),
+                "gender": np.tile(["Female", "Male"], 6),
+                "weight_kg": np.arange(n_rows, dtype=float),
+            }
+        ),
+        np.arange(n_rows),
+        np.repeat(["site-a", "site-b", "site-c"], 4),
+        ["age_decade", "gender", "weight_kg"],
+        seed,
+    )
+
+
+def test_featranker_receives_disjoint_inner_training_and_validation(monkeypatch):
+    calls = []
+
+    class SpyRanker:
+        def __init__(self, **_):
+            pass
+
+        def fit(self, X, y, feature_names):
+            self.train = set(np.asarray(y))
+            return self
+
+        def rank_features(
+            self, X_eval, y_eval, *, scoring, feature_groups, n_repeats, random_state
+        ):
+            evaluation = set(np.asarray(y_eval))
+            calls.append((self.train, evaluation, scoring, feature_groups, n_repeats, random_state))
+            return {
+                "models": {
+                    "spy": {
+                        "evaluation_score": -1.0,
+                        "importance": {
+                            name: {"values": [1.0], "mean": 1.0, "std": 0.0, "rank": rank}
+                            for rank, name in enumerate(feature_groups, start=1)
+                        },
+                    }
+                },
+                "consensus": [
+                    {
+                        "feature_group": name,
+                        "median_rank": rank,
+                        "mean_rank": rank,
+                        "rank_std": 0.0,
+                        "n_models": 1,
+                    }
+                    for rank, name in enumerate(feature_groups, start=1)
+                ],
+                "failures": [],
+                "evaluation_mode": "held_out",
+            }
+
+    monkeypatch.setattr("warfarin_dose.evaluation.FeatureRanker", SpyRanker, raising=False)
+    rank_feature_blocks_for_encoded_test_matrix(seed=7)
+
+    assert calls
+    assert all(train.isdisjoint(validation) for train, validation, *_ in calls)
+    assert all(call[2] == "neg_mean_absolute_error" for call in calls)
+    assert all(call[4] == 20 for call in calls)
 
 
 def test_site_splits_are_disjoint_and_cover_each_row_once():
@@ -150,6 +220,52 @@ def test_primary_experiment_predicts_every_patient_once(raw_frame, tmp_path):
     assert learned["y_pred"].ge(0).all()
     assert learned["outer_site"].eq(learned["site"]).all()
     assert learned[["interval_lower", "interval_upper"]].notna().all().all()
+
+
+def test_secondary_analyses_are_separate_and_keep_complete_case_from_final_model(
+    raw_frame, tmp_path, monkeypatch
+):
+    from warfarin_dose import evaluation
+
+    class SpyRanker:
+        def __init__(self, **_):
+            pass
+
+        def fit(self, X, y, feature_names):
+            return self
+
+        def rank_features(
+            self, X_eval, y_eval, *, scoring, feature_groups, n_repeats, random_state
+        ):
+            return {
+                "models": {
+                    "spy": {
+                        "importance": {
+                            name: {"mean": 1.0, "std": 0.0, "rank": rank}
+                            for rank, name in enumerate(feature_groups, start=1)
+                        }
+                    }
+                },
+                "consensus": [],
+                "failures": [],
+                "evaluation_mode": "held_out",
+            }
+
+    monkeypatch.setattr(evaluation, "FeatureRanker", SpyRanker)
+    candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
+
+    result = evaluation.run_all_analyses_frame(raw_frame, tmp_path, candidates=candidates, seed=7)
+
+    assert result == tmp_path
+    assert (tmp_path / "primary" / "final_model.joblib").exists()
+    assert (tmp_path / "feature-selection" / "feature_selection_decision.json").exists()
+    assert (tmp_path / "complete-case" / "cohort_counts.json").exists()
+    assert (tmp_path / "random-cv" / "manifest.json").exists()
+    assert (tmp_path / "ablation" / "manifest.json").exists()
+    random_manifest = json.loads((tmp_path / "random-cv" / "manifest.json").read_text())
+    assert random_manifest["analysis_label"] == "optimism_comparator"
+    complete_case = json.loads((tmp_path / "complete-case" / "manifest.json").read_text())
+    assert complete_case["selects_primary_artifact"] is False
 
 
 def test_run_experiment_defaults_to_primary_analysis():

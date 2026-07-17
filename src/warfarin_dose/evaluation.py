@@ -13,15 +13,18 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+from featranker import FeatureRanker
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import GroupKFold, LeaveOneGroupOut
+from sklearn.model_selection import GroupKFold, KFold, LeaveOneGroupOut
 
 from .data import prepare_cohort, read_raw, sha256_file
 from .features import (
     NUMERIC_FEATURES,
     build_feature_frame,
     feature_columns,
+    make_preprocessor,
     select_feature_matrix,
+    semantic_feature_groups,
     statin_gate,
 )
 from .models import (
@@ -72,6 +75,89 @@ def inner_site_splits(sites: Sequence[str]) -> list[tuple[np.ndarray, np.ndarray
     for train, validation in splits:
         _validate_split(train, validation, groups)
     return splits
+
+
+def random_outer_splits(n_rows: int, seed: int) -> list[tuple[np.ndarray, np.ndarray]]:
+    return list(KFold(n_splits=10, shuffle=True, random_state=seed).split(np.arange(n_rows)))
+
+
+def random_inner_splits(n_rows: int, seed: int) -> list[tuple[np.ndarray, np.ndarray]]:
+    return list(KFold(n_splits=5, shuffle=True, random_state=seed).split(np.arange(n_rows)))
+
+
+def resolve_inner_splits(
+    sites: np.ndarray, seed: int, mode: str
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    if mode == "site":
+        return inner_site_splits(sites)
+    if mode == "random":
+        return random_inner_splits(len(sites), seed)
+    raise ValueError(f"unknown inner split mode: {mode}")
+
+
+def rank_feature_blocks(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    sites: np.ndarray,
+    columns: Sequence[str],
+    seed: int,
+) -> tuple[pd.DataFrame, list[dict[str, object]]]:
+    rank_rows: list[dict[str, object]] = []
+    reports: list[dict[str, object]] = []
+    for fold, (train, validation) in enumerate(inner_site_splits(sites)):
+        try:
+            preprocessor = make_preprocessor(columns, scale_numeric=False)
+            X_train = preprocessor.fit_transform(X.iloc[train])
+            X_validation = preprocessor.transform(X.iloc[validation])
+            names = preprocessor.get_feature_names_out().tolist()
+            groups = semantic_feature_groups(names)
+            ranker = FeatureRanker(task="reg", group="all")
+            ranker.fit(X_train, y[train], feature_names=names)
+            report = ranker.rank_features(
+                X_validation,
+                y[validation],
+                scoring="neg_mean_absolute_error",
+                feature_groups=groups,
+                n_repeats=20,
+                random_state=seed + fold,
+            )
+            if report.get("evaluation_mode") != "held_out":
+                raise ValueError("FeatRanker must report held_out evaluation mode")
+            reports.append({"fold": fold, "report": report})
+        except Exception as error:
+            reports.append(
+                {
+                    "fold": fold,
+                    "failure": {"error_type": type(error).__name__, "message": str(error)},
+                }
+            )
+            continue
+        for model, model_report in report["models"].items():
+            for block, importance in model_report["importance"].items():
+                rank_rows.append(
+                    {
+                        "fold": fold,
+                        "model": model,
+                        "feature_block": block,
+                        "rank": importance["rank"],
+                        "importance_mean": importance["mean"],
+                        "importance_std": importance["std"],
+                    }
+                )
+    ranks = pd.DataFrame(rank_rows)
+    if ranks.empty:
+        raise RuntimeError("FeatRanker produced no successful model rankings")
+    aggregate = (
+        ranks.groupby("feature_block")["rank"]
+        .agg(median_rank="median", mean_rank="mean", rank_std="std", observations="size")
+        .reset_index()
+    )
+    top5 = ranks.groupby("feature_block")["rank"].apply(lambda values: float((values <= 5).mean()))
+    aggregate["top5_frequency"] = aggregate["feature_block"].map(top5)
+    aggregate = aggregate.sort_values(
+        ["median_rank", "mean_rank", "feature_block"]
+    ).reset_index(drop=True)
+    return aggregate, reports
 
 
 def dose_category(values: Sequence[float]) -> np.ndarray:
@@ -241,10 +327,11 @@ def score_candidates(
     columns: Sequence[str],
     candidates: Sequence[ModelSpec],
     seed: int,
+    inner_mode: str = "site",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     score_rows: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
-    splits = inner_site_splits(sites)
+    splits = resolve_inner_splits(sites, seed, inner_mode)
     for spec in candidates:
         for fold, (train, validation) in enumerate(splits):
             try:
@@ -315,9 +402,10 @@ def calibration_residuals(
     columns: Sequence[str],
     spec: ModelSpec,
     seed: int,
+    inner_mode: str = "site",
 ) -> np.ndarray:
     residuals = np.full(len(X), np.nan)
-    for fold, (train, validation) in enumerate(inner_site_splits(sites)):
+    for fold, (train, validation) in enumerate(resolve_inner_splits(sites, seed, inner_mode)):
         pipeline = make_model_pipeline(columns, spec, seed + fold)
         pipeline.fit(X.iloc[train], y[train])
         residuals[validation] = np.abs(y[validation] - pipeline.predict(X.iloc[validation]))
@@ -371,12 +459,15 @@ def _run_learned_procedure(
     candidates: Sequence[ModelSpec],
     seed: int,
     statin_included_by_fold: Sequence[bool] | None = None,
+    outer_splits: Sequence[tuple[np.ndarray, np.ndarray]] | None = None,
+    inner_mode: str = "site",
+    analysis_label: str = "site_held_out",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     y = frame["weekly_dose_mg"].to_numpy(float)
     predictions: list[dict[str, object]] = []
     selections: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
-    outer_splits = site_outer_splits(frame)
+    outer_splits = site_outer_splits(frame) if outer_splits is None else list(outer_splits)
     if statin_included_by_fold is not None and len(statin_included_by_fold) != len(outer_splits):
         raise ValueError("statin decisions must match outer folds")
     for outer_fold, (train, test) in enumerate(outer_splits):
@@ -394,6 +485,7 @@ def _run_learned_procedure(
             fold_columns,
             candidates,
             seed + outer_fold * 100,
+            inner_mode,
         )
         selected = select_one_se(scores, candidates)
         residuals = calibration_residuals(
@@ -403,6 +495,7 @@ def _run_learned_procedure(
             fold_columns,
             selected,
             seed + outer_fold * 100,
+            inner_mode,
         )
         radius = conformal_quantile(residuals, coverage=0.90)
         pipeline = make_model_pipeline(fold_columns, selected, seed + outer_fold)
@@ -426,6 +519,7 @@ def _run_learned_procedure(
                     "model_family": selected.family,
                     "target_mode": selected.target_mode,
                     "candidate_key": selected.key,
+                    "analysis_label": analysis_label,
                 }
             )
             predictions.append(item)
@@ -438,6 +532,7 @@ def _run_learned_procedure(
                 "candidate_key": selected.key,
                 "conformal_radius": radius,
                 "statin_included": "statin" in fold_columns,
+                "analysis_label": analysis_label,
             }
         )
         if not fold_failures.empty:
@@ -613,8 +708,13 @@ def fit_final_model(
     candidates: Sequence[ModelSpec],
     output_path: Path,
     seed: int,
+    columns: Sequence[str] | None = None,
 ) -> dict[str, object]:
-    columns = feature_columns(feature_set, bool(frame.attrs["include_statin"]))
+    columns = list(
+        feature_columns(feature_set, bool(frame.attrs["include_statin"]))
+        if columns is None
+        else columns
+    )
     X = select_feature_matrix(frame, columns)
     y = frame["weekly_dose_mg"].to_numpy(float)
     sites = frame["site"].astype(str).to_numpy()
@@ -678,6 +778,466 @@ def _outer_statin_decisions(raw: pd.DataFrame, frame: pd.DataFrame) -> list[dict
             }
         )
     return decisions
+
+
+def _json_default(value: object) -> object:
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"not JSON serializable: {type(value).__name__}")
+
+
+def _write_json(path: Path, value: object) -> None:
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True, default=_json_default) + "\n", encoding="utf-8"
+    )
+
+
+def _new_analysis_dir(output_dir: Path) -> Path:
+    output_dir = Path(output_dir)
+    if (output_dir / "manifest.json").exists():
+        raise FileExistsError(f"refusing to overwrite existing analysis: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def _write_secondary_analysis(
+    output_dir: Path,
+    analysis: str,
+    predictions: pd.DataFrame,
+    selections: pd.DataFrame,
+    failures: pd.DataFrame,
+    seed: int,
+    *,
+    analysis_label: str = "site_held_out",
+    extra: dict[str, object] | None = None,
+) -> Path:
+    output_dir = _new_analysis_dir(output_dir)
+    tables = {
+        "predictions.csv": predictions,
+        "selections.csv": selections,
+        "failures.csv": failures.reindex(columns=_FAILURE_COLUMNS),
+        "metrics.csv": _metrics_table(predictions),
+        "site_metrics.csv": _suppressed_metrics(predictions, "site", "site"),
+    }
+    if analysis_label == "optimism_comparator":
+        tables = {
+            name: table.assign(analysis_label=analysis_label)
+            for name, table in tables.items()
+        }
+    for name, table in tables.items():
+        table.to_csv(output_dir / name, index=False)
+    manifest = {
+        "analysis": analysis,
+        "analysis_label": analysis_label,
+        "seed": seed,
+        "git_revision": _git_revision(),
+        "output_files": [*tables, "manifest.json"],
+    }
+    if extra:
+        manifest.update(extra)
+    _write_json(output_dir / "manifest.json", manifest)
+    return output_dir
+
+
+def _subset_summary(
+    scores: pd.DataFrame, selected: ModelSpec, name: str, columns: Sequence[str]
+) -> dict[str, object]:
+    mae = scores.loc[scores["candidate_key"].eq(selected.key), "mae_mg_week"]
+    return {
+        "subset": name,
+        "feature_blocks": list(columns),
+        "candidate_key": selected.key,
+        "mean_mae_mg_week": float(mae.mean()),
+        "se_mae_mg_week": float(mae.std(ddof=1) / np.sqrt(len(mae))) if len(mae) > 1 else 0.0,
+    }
+
+
+def _run_ranked_procedure(
+    frame: pd.DataFrame,
+    columns: Sequence[str],
+    candidates: Sequence[ModelSpec],
+    seed: int,
+    statin_included_by_fold: Sequence[bool],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, list[dict[str, object]]]:
+    y = frame["weekly_dose_mg"].to_numpy(float)
+    predictions: list[dict[str, object]] = []
+    selections: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+    ranking_rows: list[pd.DataFrame] = []
+    reports: list[dict[str, object]] = []
+    outer_splits = site_outer_splits(frame)
+    if len(statin_included_by_fold) != len(outer_splits):
+        raise ValueError("statin decisions must match outer folds")
+    for outer_fold, (train, test) in enumerate(outer_splits):
+        fold_columns = list(columns)
+        if statin_included_by_fold[outer_fold]:
+            fold_columns.append("statin")
+        X = select_feature_matrix(frame, fold_columns)
+        training = X.iloc[train].reset_index(drop=True)
+        training_sites = frame.iloc[train]["site"].astype(str).to_numpy()
+        outer_site = str(frame.iloc[test[0]]["site"])
+        ranks, fold_reports = rank_feature_blocks(
+            training, y[train], training_sites, fold_columns, seed + outer_fold * 100
+        )
+        ranking_rows.append(ranks.assign(outer_fold=outer_fold, outer_site=outer_site))
+        reports.extend(
+            [
+                {"outer_fold": outer_fold, "outer_site": outer_site, **report}
+                for report in fold_reports
+            ]
+        )
+        ordered = ranks["feature_block"].tolist()
+        subsets = [("top5", ordered[:5]), ("top10", ordered[:10]), ("all", ordered)]
+        summaries: list[dict[str, object]] = []
+        selected_by_subset: dict[str, ModelSpec] = {}
+        for name, subset_columns in subsets:
+            scores, fold_failures = score_candidates(
+                training,
+                y[train],
+                training_sites,
+                subset_columns,
+                candidates,
+                seed + outer_fold * 100,
+            )
+            selected = select_one_se(scores, candidates)
+            selected_by_subset[name] = selected
+            summaries.append(_subset_summary(scores, selected, name, subset_columns))
+            failures.extend(
+                fold_failures.assign(
+                    procedure="pharmacogenomic_ranked", outer_fold=outer_fold, outer_site=outer_site
+                ).to_dict("records")
+            )
+        best = min(summaries, key=lambda item: float(item["mean_mae_mg_week"]))
+        threshold = float(best["mean_mae_mg_week"]) + float(best["se_mae_mg_week"])
+        chosen = next(item for item in summaries if float(item["mean_mae_mg_week"]) <= threshold)
+        chosen_columns = list(chosen["feature_blocks"])
+        selected = selected_by_subset[str(chosen["subset"])]
+        residuals = calibration_residuals(
+            training,
+            y[train],
+            training_sites,
+            chosen_columns,
+            selected,
+            seed + outer_fold * 100,
+        )
+        pipeline = make_model_pipeline(chosen_columns, selected, seed + outer_fold)
+        pipeline.fit(X.iloc[train], y[train])
+        predicted = pipeline.predict(X.iloc[test])
+        lower, upper = conformal_interval(predicted, conformal_quantile(residuals, coverage=0.90))
+        target_min, target_max = float(y[train].min()), float(y[train].max())
+        for position, prediction, low, high in zip(test, predicted, lower, upper, strict=True):
+            item = _prediction_row(
+                frame,
+                position,
+                "pharmacogenomic_ranked",
+                outer_fold,
+                float(prediction),
+                lower=float(low),
+                upper=float(high),
+            )
+            item.update(
+                {
+                    "extrapolated_target": bool(prediction < target_min or prediction > target_max),
+                    "model_family": selected.family,
+                    "target_mode": selected.target_mode,
+                    "candidate_key": selected.key,
+                    "analysis_label": "site_held_out",
+                }
+            )
+            predictions.append(item)
+        selections.append(
+            {
+                "procedure": "pharmacogenomic_ranked",
+                "outer_fold": outer_fold,
+                "outer_site": outer_site,
+                "subset": chosen["subset"],
+                "feature_blocks": json.dumps(chosen_columns),
+                "candidate_key": selected.key,
+                "subset_summaries": json.dumps(summaries),
+                "statin_included": "statin" in fold_columns,
+            }
+        )
+    result = pd.DataFrame(predictions)
+    if len(result) != len(frame) or not result.groupby("row_key").size().eq(1).all():
+        raise ValueError(
+            "pharmacogenomic_ranked did not produce exactly one outer prediction per patient"
+        )
+    return (
+        result,
+        pd.DataFrame(selections),
+        pd.DataFrame(failures, columns=_FAILURE_COLUMNS),
+        pd.concat(ranking_rows, ignore_index=True),
+        reports,
+    )
+
+
+def _site_mae_summary(predictions: pd.DataFrame, procedure: str) -> dict[str, float]:
+    values = _finite_predictions(predictions).loc[lambda rows: rows["procedure"].eq(procedure)]
+    per_site = (
+        (values["y_true"] - values["y_pred"]).abs().groupby(values["site"]).mean().to_numpy(float)
+    )
+    return {
+        "mean_site_mae_mg_week": float(per_site.mean()),
+        "site_mae_se_mg_week": float(per_site.std(ddof=1) / np.sqrt(len(per_site)))
+        if len(per_site) > 1
+        else 0.0,
+        "site_count": int(len(per_site)),
+    }
+
+
+def run_feature_selection_frame(
+    raw: pd.DataFrame,
+    primary_dir: Path,
+    output_dir: Path,
+    candidates: Sequence[ModelSpec] | None = None,
+    seed: int = DEFAULT_SEED,
+) -> dict[str, object]:
+    cohort = prepare_cohort(raw)
+    frame, metadata = build_feature_frame(cohort.data)
+    frame.attrs["include_statin"] = metadata["include_statin"]
+    candidates = list(model_candidates(seed) if candidates is None else candidates)
+    statin = _outer_statin_decisions(cohort.data, frame)
+    base_columns = feature_columns("pharmacogenomic", include_statin=False)
+    predictions, selections, failures, ranks, reports = _run_ranked_procedure(
+        frame, base_columns, candidates, seed, [bool(item["included"]) for item in statin]
+    )
+    primary_predictions = pd.read_csv(Path(primary_dir) / "predictions.csv")
+    all_feature = _site_mae_summary(primary_predictions, "pharmacogenomic_ml")
+    ranked = _site_mae_summary(predictions, "pharmacogenomic_ranked")
+    selected_counts = selections["feature_blocks"].map(lambda value: len(json.loads(value)))
+    ranked_blocks = int(selected_counts.median())
+    all_blocks = len(base_columns) + int(any(item["included"] for item in statin))
+    adopt = ranked["mean_site_mae_mg_week"] < all_feature["mean_site_mae_mg_week"] or (
+        ranked["mean_site_mae_mg_week"]
+        <= all_feature["mean_site_mae_mg_week"] + all_feature["site_mae_se_mg_week"]
+        and ranked_blocks <= 0.70 * all_blocks
+    )
+    decision = {
+        "decision": "adopt_ranked_subset" if adopt else "retain_all_features",
+        "rule": (
+            "lower mean site MAE, or within one all-feature site-MAE SE with at least "
+            "30% fewer semantic blocks"
+        ),
+        "all_feature": all_feature,
+        "ranked": ranked,
+        "ranked_block_count": ranked_blocks,
+        "all_feature_block_count": all_blocks,
+        "outer_predictions_frozen": True,
+    }
+    output_dir = _write_secondary_analysis(
+        output_dir, "feature-selection", predictions, selections, failures, seed
+    )
+    ranks.to_csv(output_dir / "feature_rankings.csv", index=False)
+    _write_json(output_dir / "featranker_reports.json", reports)
+    _write_json(output_dir / "feature_selection_decision.json", decision)
+    return {"decision": decision, "frame": frame, "base_columns": base_columns, "ranks": ranks}
+
+
+def _complete_case_mask(frame: pd.DataFrame, columns: Sequence[str]) -> pd.Series:
+    numeric = [column for column in columns if column in NUMERIC_FEATURES]
+    categorical = [column for column in columns if column not in NUMERIC_FEATURES]
+    return pd.Series(
+        np.isfinite(frame[numeric].to_numpy(float)).all(axis=1)
+        & frame[categorical].ne("Unknown").all(axis=1).to_numpy(),
+        index=frame.index,
+    )
+
+
+def run_complete_case_frame(
+    raw: pd.DataFrame,
+    output_dir: Path,
+    candidates: Sequence[ModelSpec] | None = None,
+    seed: int = DEFAULT_SEED,
+) -> Path:
+    cohort = prepare_cohort(raw)
+    frame, metadata = build_feature_frame(cohort.data)
+    frame.attrs["include_statin"] = metadata["include_statin"]
+    base_columns = feature_columns("pharmacogenomic", include_statin=False)
+    mask = _complete_case_mask(frame, base_columns)
+    complete_frame = frame.loc[mask].reset_index(drop=True)
+    complete_raw = cohort.data.loc[mask].reset_index(drop=True)
+    retained = complete_frame.groupby("site").size().rename("complete_case_n").to_dict()
+    totals = frame.groupby("site").size().rename("eligible_n").to_dict()
+    counts = {
+        "eligible_rows": len(frame),
+        "complete_case_rows": len(complete_frame),
+        "site_retention": [
+            {
+                "site": site,
+                "eligible_n": int(totals[site]),
+                "complete_case_n": int(retained.get(site, 0)),
+            }
+            for site in sorted(totals)
+        ],
+    }
+    candidates = list(model_candidates(seed) if candidates is None else candidates)
+    statin = _outer_statin_decisions(complete_raw, complete_frame)
+    predictions, selections, failures = _run_learned_procedure(
+        complete_frame,
+        "pharmacogenomic_complete_case",
+        base_columns,
+        candidates,
+        seed,
+        [bool(item["included"]) for item in statin],
+    )
+    output_dir = _write_secondary_analysis(
+        output_dir, "complete-case", predictions, selections, failures, seed
+    )
+    _write_json(output_dir / "cohort_counts.json", counts)
+    manifest = json.loads((output_dir / "manifest.json").read_text())
+    manifest["selects_primary_artifact"] = False
+    _write_json(output_dir / "manifest.json", manifest)
+    return output_dir
+
+
+def run_random_cv_frame(
+    raw: pd.DataFrame,
+    output_dir: Path,
+    candidates: Sequence[ModelSpec] | None = None,
+    seed: int = DEFAULT_SEED,
+) -> Path:
+    cohort = prepare_cohort(raw)
+    frame, metadata = build_feature_frame(cohort.data)
+    frame.attrs["include_statin"] = metadata["include_statin"]
+    candidates = list(model_candidates(seed) if candidates is None else candidates)
+    predictions, selections, failures = _run_learned_procedure(
+        frame,
+        "pharmacogenomic_random_cv",
+        feature_columns("pharmacogenomic", include_statin=False),
+        candidates,
+        seed,
+        outer_splits=random_outer_splits(len(frame), seed),
+        inner_mode="random",
+        analysis_label="optimism_comparator",
+    )
+    return _write_secondary_analysis(
+        output_dir,
+        "random-cv",
+        predictions,
+        selections,
+        failures,
+        seed,
+        analysis_label="optimism_comparator",
+    )
+
+
+def run_ablation_frame(
+    raw: pd.DataFrame,
+    output_dir: Path,
+    candidates: Sequence[ModelSpec] | None = None,
+    seed: int = DEFAULT_SEED,
+) -> Path:
+    cohort = prepare_cohort(raw)
+    frame, metadata = build_feature_frame(cohort.data)
+    frame.attrs["include_statin"] = metadata["include_statin"]
+    candidates = list(model_candidates(seed) if candidates is None else candidates)
+    base_columns = feature_columns("pharmacogenomic", include_statin=False)
+    statin = _outer_statin_decisions(cohort.data, frame)
+    global_columns = base_columns + (["statin"] if metadata["include_statin"] else [])
+    global_ranks, reports = rank_feature_blocks(
+        select_feature_matrix(frame, global_columns),
+        frame["weekly_dose_mg"].to_numpy(float),
+        frame["site"].astype(str).to_numpy(),
+        global_columns,
+        seed,
+    )
+    ranked_blocks = global_ranks.loc[
+        global_ranks["median_rank"].le(5) & global_ranks["top5_frequency"].ge(0.70),
+        "feature_block",
+    ].head(3).tolist()
+    blocks = {
+        "demographics": ["age_decade", "gender"],
+        "anthropometrics": ["height_cm", "weight_kg"],
+        "clinical_conditions": [
+            "indication",
+            "target_inr",
+            "diabetes",
+            "chf_cardiomyopathy",
+            "valve_replacement",
+        ],
+        "medications": ["amiodarone", "enzyme_inducer", "smoker", "statin"],
+        "pharmacogenomics": ["cyp2c9_group", "vkorc1"],
+        **{f"ranked_{block}": [block] for block in ranked_blocks},
+    }
+    all_predictions: list[pd.DataFrame] = []
+    all_selections: list[pd.DataFrame] = []
+    all_failures: list[pd.DataFrame] = []
+    for name, removed in blocks.items():
+        columns = [column for column in base_columns if column not in removed]
+        fold_statin = [False] * len(statin) if "statin" in removed else [
+            bool(item["included"]) for item in statin
+        ]
+        predictions, selections, failures = _run_learned_procedure(
+            frame,
+            f"pharmacogenomic_ablation_{name}",
+            columns,
+            candidates,
+            seed,
+            fold_statin,
+        )
+        all_predictions.append(predictions)
+        all_selections.append(selections.assign(ablation=name, removed_blocks=json.dumps(removed)))
+        all_failures.append(failures)
+    output_dir = _write_secondary_analysis(
+        output_dir,
+        "ablation",
+        pd.concat(all_predictions, ignore_index=True),
+        pd.concat(all_selections, ignore_index=True),
+        pd.concat(all_failures, ignore_index=True),
+        seed,
+    )
+    global_ranks.to_csv(output_dir / "feature_rankings.csv", index=False)
+    _write_json(output_dir / "featranker_reports.json", reports)
+    _write_json(
+        output_dir / "ablation_plan.json", {"blocks": blocks, "ranked_blocks": ranked_blocks}
+    )
+    return output_dir
+
+
+def run_all_analyses_frame(
+    raw: pd.DataFrame,
+    output_dir: Path,
+    candidates: Sequence[ModelSpec] | None = None,
+    seed: int = DEFAULT_SEED,
+) -> Path:
+    output_dir = Path(output_dir)
+    candidates = list(model_candidates(seed) if candidates is None else candidates)
+    primary_dir = run_primary_frame(raw, output_dir / "primary", candidates=candidates, seed=seed)
+    result = run_feature_selection_frame(
+        raw, primary_dir, output_dir / "feature-selection", candidates=candidates, seed=seed
+    )
+    run_complete_case_frame(raw, output_dir / "complete-case", candidates=candidates, seed=seed)
+    run_random_cv_frame(raw, output_dir / "random-cv", candidates=candidates, seed=seed)
+    run_ablation_frame(raw, output_dir / "ablation", candidates=candidates, seed=seed)
+    if result["decision"]["decision"] == "adopt_ranked_subset":
+        frame = result["frame"]
+        ranks = result["ranks"].sort_values(["median_rank", "mean_rank", "feature_block"])
+        selections = pd.read_csv(output_dir / "feature-selection" / "selections.csv")
+        subset_size = int(
+            pd.Series([len(json.loads(value)) for value in selections["feature_blocks"]])
+            .mode()
+            .iloc[0]
+        )
+        columns = ranks["feature_block"].drop_duplicates().head(subset_size).tolist()
+        fit_final_model(
+            frame,
+            "pharmacogenomic",
+            candidates,
+            primary_dir / "final_model.joblib",
+            seed,
+            columns,
+        )
+    return output_dir
+
+
+def run_all_analyses(raw_path: Path, output_dir: Path, seed: int = DEFAULT_SEED) -> Path:
+    raw = read_raw(raw_path)
+    raw.attrs["source_sha256"] = sha256_file(raw_path)
+    return run_all_analyses_frame(raw, output_dir, seed=seed)
 
 
 def run_primary_frame(
@@ -750,9 +1310,8 @@ def run_primary_frame(
     (output_dir / "feature_metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    selected_feature_set = _best_feature_set(predictions)
     fit_final_model(
-        frame, selected_feature_set, candidates, output_dir / "final_model.joblib", seed
+        frame, "pharmacogenomic", candidates, output_dir / "final_model.joblib", seed
     )
     output_files = [*tables, "feature_metadata.json", "final_model.joblib", "manifest.json"]
     manifest = {
