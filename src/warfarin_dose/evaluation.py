@@ -679,6 +679,32 @@ def _bootstrap_table(predictions: pd.DataFrame, seed: int) -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True) if rows else _empty(["procedure", "iteration"])
 
 
+def _paired_bootstrap_table(predictions: pd.DataFrame, seed: int) -> pd.DataFrame:
+    rows = []
+    finite = _finite_predictions(predictions)
+    procedures = sorted(finite["procedure"].unique())
+    pair_index = 0
+    for index, procedure_a in enumerate(procedures):
+        left = finite.loc[finite["procedure"].eq(procedure_a)]
+        for procedure_b in procedures[index + 1 :]:
+            right = finite.loc[finite["procedure"].eq(procedure_b)]
+            shared_sites = left[["row_key", "site"]].merge(
+                right[["row_key", "site"]], on=["row_key", "site"]
+            )["site"].nunique()
+            if shared_sites >= 2:
+                rows.append(
+                    paired_cluster_bootstrap(left, right, seed=seed + pair_index).assign(
+                        procedure_a=procedure_a, procedure_b=procedure_b
+                    )
+                )
+            pair_index += 1
+    return (
+        pd.concat(rows, ignore_index=True)
+        if rows
+        else _empty(["procedure_a", "procedure_b", "iteration"])
+    )
+
+
 def _git_revision() -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
@@ -1335,6 +1361,7 @@ def run_primary_frame(
             names=["subgroup_type"],
         ).reset_index(level=0),
         "bootstrap.csv": _bootstrap_table(predictions, seed),
+        "paired_bootstrap.csv": _paired_bootstrap_table(predictions, seed),
         "paired_differences.csv": _paired_differences(predictions),
     }
     for name, table in tables.items():

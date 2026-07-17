@@ -60,16 +60,14 @@ def _interval_rows(
     valid = predictions.loc[
         predictions["interval_lower"].notna() & predictions["interval_upper"].notna()
     ].copy()
-    groups = (
-        [("All", valid)]
-        if group_column is None
-        else valid.groupby(group_column, dropna=False, sort=True)
-    )
-    for key, group in groups:
+    group_columns = ["procedure"] + ([group_column] if group_column is not None else [])
+    for keys, group in valid.groupby(group_columns, dropna=False, sort=True):
+        keys = keys if isinstance(keys, tuple) else (keys,)
         n = int(len(group))
         row = {
+            "procedure": str(keys[0]),
             "scope": scope,
-            "group": str(key),
+            "group": "All" if group_column is None else str(keys[1]),
             "n": n,
             "interval_coverage_90": float(
                 (
@@ -176,7 +174,12 @@ def _report_figures(predictions: pd.DataFrame, figures: Path, ranks: pd.DataFram
             .pivot(index="row_key", columns="procedure", values=["y_true", "y_pred"])
             .dropna()
         )
-        if paired.empty:
+        required = {
+            (value, procedure)
+            for value in ["y_true", "y_pred"]
+            for procedure in procedures
+        }
+        if paired.empty or not required.issubset(paired.columns):
             axis.text(0.5, 0.5, "No finite paired predictions", ha="center", va="center")
         else:
             values = paired["y_true"].to_numpy().ravel()

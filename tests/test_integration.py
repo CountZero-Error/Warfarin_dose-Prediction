@@ -1,5 +1,6 @@
 import json
 
+import pandas as pd
 import pytest
 
 from warfarin_dose.evaluation import run_primary_frame
@@ -38,6 +39,21 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     assert result["average_daily_dose_mg"] == result["weekly_dose_mg"] / 7
     assert result["interval_90_mg_week"][0] >= 0
     assert "not prescribing guidance" in result["warning"].lower()
+
+    interval_metrics = pd.read_csv(run_dir / "report" / "tables" / "interval_metrics.csv")
+    overall_intervals = interval_metrics.loc[interval_metrics["scope"].eq("overall")]
+    assert set(overall_intervals["procedure"]) == {"clinical_ml", "pharmacogenomic_ml"}
+    assert (run_dir / "paired_bootstrap.csv").exists()
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert "paired_bootstrap.csv" in manifest["output_files"]
+
+    predictions_path = run_dir / "predictions.csv"
+    predictions = pd.read_csv(predictions_path)
+    missing_comparator = predictions["procedure"].eq("iwpc_pharmacogenetic")
+    predictions.loc[missing_comparator, "y_pred"] = float("nan")
+    predictions.loc[missing_comparator, "prediction_status"] = "missing_required_comparator_input"
+    predictions.to_csv(predictions_path, index=False)
+    assert build_report(run_dir).exists()
 
 
 def test_prediction_rejects_forbidden_unknown_and_nonfinite_inputs(raw_frame, tmp_path):
