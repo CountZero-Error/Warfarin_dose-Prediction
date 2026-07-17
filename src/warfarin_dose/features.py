@@ -90,7 +90,7 @@ def combine_binary(frame: pd.DataFrame, columns: Sequence[str]) -> pd.Series:
 
 
 def normalize_cyp2c9(value: object) -> tuple[str, str]:
-    if pd.isna(value) or str(value).strip().lower() in {"", "unknown", "nan"}:
+    if pd.isna(value) or str(value).replace(" ", "").lower() in {"", "unknown", "nan", "nocall"}:
         return "Unknown", "Unknown"
     diplotype = str(value).replace(" ", "")
     diplotype = "/".join(sorted(diplotype.split("/")))

@@ -5,10 +5,15 @@ from warfarin_dose.features import (
     build_feature_frame,
     feature_columns,
     make_preprocessor,
+    normalize_cyp2c9,
     parse_age_decade,
     select_feature_matrix,
     semantic_feature_groups,
 )
+
+
+def test_cyp2c9_no_call_is_unknown():
+    assert normalize_cyp2c9("No Call") == ("Unknown", "Unknown")
 
 
 def test_age_and_genotype_mapping(raw_frame):
