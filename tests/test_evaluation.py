@@ -9,8 +9,11 @@ from warfarin_dose.evaluation import (
     inner_site_splits,
     paired_cluster_bootstrap,
     regression_metrics,
+    run_primary_frame,
+    select_one_se,
     site_outer_splits,
 )
+from warfarin_dose.models import ModelSpec
 
 
 def test_site_splits_are_disjoint_and_cover_each_row_once():
@@ -96,3 +99,41 @@ def test_paired_cluster_bootstrap_rejects_duplicate_pairing_keys():
 
     with pytest.raises(ValueError, match="duplicate"):
         paired_cluster_bootstrap(predictions, predictions)
+
+
+def test_one_se_prefers_simpler_family_then_direct_target():
+    specs = [
+        ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0),
+        ModelSpec("hist_gb", {"learning_rate": 0.1, "max_leaf_nodes": 15}, "sqrt", 2, 0),
+    ]
+    scores = pd.DataFrame(
+        {
+            "candidate_key": [specs[0].key] * 3 + [specs[1].key] * 3,
+            "fold": [0, 1, 2, 0, 1, 2],
+            "mae_mg_week": [8.4, 8.5, 8.6, 7.0, 8.1, 9.2],
+        }
+    )
+
+    assert select_one_se(scores, specs) == specs[0]
+
+
+def test_primary_experiment_predicts_every_patient_once(raw_frame, tmp_path):
+    candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
+
+    result = run_primary_frame(raw_frame, tmp_path, candidates=candidates, seed=7)
+    predictions = pd.read_csv(result / "predictions.csv")
+    learned = predictions[predictions["procedure"].isin(["clinical_ml", "pharmacogenomic_ml"])]
+
+    counts = learned.groupby(["procedure", "row_key"]).size()
+    assert counts.eq(1).all()
+    assert learned["y_pred"].ge(0).all()
+    assert learned["outer_site"].eq(learned["site"]).all()
+    assert learned[["interval_lower", "interval_upper"]].notna().all().all()
+
+
+def test_run_experiment_defaults_to_primary_analysis():
+    from warfarin_dose.cli import build_parser
+
+    args = build_parser().parse_args(["run-experiment"])
+
+    assert args.analysis == "primary"

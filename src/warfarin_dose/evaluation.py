@@ -1,12 +1,30 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import platform
+import subprocess
 from collections.abc import Sequence
+from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold, LeaveOneGroupOut
+
+from .data import prepare_cohort, read_raw, sha256_file
+from .features import NUMERIC_FEATURES, build_feature_frame, feature_columns, select_feature_matrix
+from .models import (
+    ModelSpec,
+    iwpc_clinical,
+    iwpc_pharmacogenetic,
+    make_model_pipeline,
+    model_candidates,
+)
 
 DEFAULT_SEED = 20260717
 BOOTSTRAP_ITERATIONS = 2_000
@@ -191,3 +209,542 @@ def percentile_interval(values: Sequence[float]) -> tuple[float, float]:
         raise ValueError("bootstrap interval contains nonfinite values")
     low, high = np.quantile(finite, [0.025, 0.975])
     return float(low), float(high)
+
+
+_FAILURE_COLUMNS = [
+    "stage",
+    "candidate_key",
+    "fold",
+    "error_type",
+    "message",
+    "procedure",
+    "outer_fold",
+    "outer_site",
+]
+_AUDIT_COLUMNS = ["gender", "age_group", "race_audit", "cyp2c9_group", "vkorc1", "dose_category"]
+
+
+def _empty(columns: Sequence[str]) -> pd.DataFrame:
+    return pd.DataFrame(columns=list(columns))
+
+
+def score_candidates(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    sites: np.ndarray,
+    columns: Sequence[str],
+    candidates: Sequence[ModelSpec],
+    seed: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    score_rows: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+    splits = inner_site_splits(sites)
+    for spec in candidates:
+        for fold, (train, validation) in enumerate(splits):
+            try:
+                pipeline = make_model_pipeline(columns, spec, seed + fold)
+                pipeline.fit(X.iloc[train], y[train])
+                prediction = pipeline.predict(X.iloc[validation])
+                score_rows.append(
+                    {
+                        "candidate_key": spec.key,
+                        "fold": fold,
+                        "mae_mg_week": float(mean_absolute_error(y[validation], prediction)),
+                    }
+                )
+            except Exception as error:
+                failures.append(
+                    {
+                        "stage": "inner_fit",
+                        "candidate_key": spec.key,
+                        "fold": fold,
+                        "error_type": type(error).__name__,
+                        "message": str(error),
+                    }
+                )
+    scores = pd.DataFrame(score_rows, columns=["candidate_key", "fold", "mae_mg_week"])
+    complete = (
+        scores.groupby("candidate_key")["fold"].nunique().eq(len(splits))
+        if not scores.empty
+        else pd.Series()
+    )
+    scores = scores[scores["candidate_key"].isin(complete[complete].index)].reset_index(drop=True)
+    if scores.empty:
+        raise RuntimeError(f"no successful candidate model; failures={failures}")
+    return scores, pd.DataFrame(failures, columns=_FAILURE_COLUMNS[:5])
+
+
+def select_one_se(scores: pd.DataFrame, candidates: Sequence[ModelSpec]) -> ModelSpec:
+    required = {"candidate_key", "fold", "mae_mg_week"}
+    if required - set(scores) or scores.empty:
+        raise RuntimeError("one-standard-error selection requires successful inner scores")
+    expected_fold_count = int(scores["fold"].nunique())
+    complete = scores.groupby("candidate_key")["fold"].nunique().eq(expected_fold_count)
+    summary = scores[scores["candidate_key"].isin(complete[complete].index)].groupby(
+        "candidate_key"
+    )["mae_mg_week"].agg(["mean", "std", "count"])
+    if summary.empty:
+        raise RuntimeError("one-standard-error selection found no successful candidate")
+    summary["se"] = summary["std"].fillna(0.0) / np.sqrt(summary["count"])
+    best_key = summary["mean"].idxmin()
+    threshold = float(summary.loc[best_key, "mean"] + summary.loc[best_key, "se"])
+    eligible = set(summary.index[summary["mean"] <= threshold])
+    successful = [spec for spec in candidates if spec.key in eligible]
+    if not successful:
+        raise RuntimeError("one-standard-error selection found no successful candidate")
+    return min(
+        successful,
+        key=lambda spec: (
+            spec.family_order,
+            0 if spec.target_mode == "direct" else 1,
+            spec.complexity_order,
+        ),
+    )
+
+
+def calibration_residuals(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    sites: np.ndarray,
+    columns: Sequence[str],
+    spec: ModelSpec,
+    seed: int,
+) -> np.ndarray:
+    residuals = np.full(len(X), np.nan)
+    for fold, (train, validation) in enumerate(inner_site_splits(sites)):
+        pipeline = make_model_pipeline(columns, spec, seed + fold)
+        pipeline.fit(X.iloc[train], y[train])
+        residuals[validation] = np.abs(y[validation] - pipeline.predict(X.iloc[validation]))
+    if not np.isfinite(residuals).all():
+        raise ValueError("inner grouped conformal calibration did not cover every training row")
+    return residuals
+
+
+def _age_group(value: object) -> str:
+    if not np.isfinite(value):
+        return "Unknown"
+    return "<50" if value < 5 else "50-69" if value < 7 else "70+"
+
+
+def _prediction_row(
+    frame: pd.DataFrame,
+    position: int,
+    procedure: str,
+    outer_fold: int,
+    prediction: float,
+    *,
+    lower: float = np.nan,
+    upper: float = np.nan,
+    status: str = "ok",
+) -> dict[str, object]:
+    row = frame.iloc[position]
+    return {
+        "row_key": row["row_key"],
+        "site": row["site"],
+        "outer_site": row["site"],
+        "outer_fold": outer_fold,
+        "procedure": procedure,
+        "y_true": float(row["weekly_dose_mg"]),
+        "y_pred": prediction,
+        "interval_lower": lower,
+        "interval_upper": upper,
+        "prediction_status": status,
+        "gender": row["gender"],
+        "age_group": _age_group(row["age_decade"]),
+        "race_audit": row["race"],
+        "cyp2c9_group": row["cyp2c9_group"],
+        "vkorc1": row["vkorc1"],
+        "dose_category": dose_category([row["weekly_dose_mg"]])[0],
+    }
+
+
+def _run_learned_procedure(
+    frame: pd.DataFrame,
+    procedure: str,
+    columns: Sequence[str],
+    candidates: Sequence[ModelSpec],
+    seed: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    X = select_feature_matrix(frame, columns)
+    y = frame["weekly_dose_mg"].to_numpy(float)
+    predictions: list[dict[str, object]] = []
+    selections: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+    for outer_fold, (train, test) in enumerate(site_outer_splits(frame)):
+        training_sites = frame.iloc[train]["site"].astype(str).to_numpy()
+        scores, fold_failures = score_candidates(
+            X.iloc[train].reset_index(drop=True),
+            y[train],
+            training_sites,
+            columns,
+            candidates,
+            seed + outer_fold * 100,
+        )
+        selected = select_one_se(scores, candidates)
+        residuals = calibration_residuals(
+            X.iloc[train].reset_index(drop=True),
+            y[train],
+            training_sites,
+            columns,
+            selected,
+            seed + outer_fold * 100,
+        )
+        radius = conformal_quantile(residuals, coverage=0.90)
+        pipeline = make_model_pipeline(columns, selected, seed + outer_fold)
+        pipeline.fit(X.iloc[train], y[train])
+        predicted = pipeline.predict(X.iloc[test])
+        lower, upper = conformal_interval(predicted, radius)
+        target_min, target_max = float(y[train].min()), float(y[train].max())
+        for position, prediction, low, high in zip(test, predicted, lower, upper, strict=True):
+            item = _prediction_row(
+                frame,
+                position,
+                procedure,
+                outer_fold,
+                float(prediction),
+                lower=float(low),
+                upper=float(high),
+            )
+            item.update(
+                {
+                    "extrapolated_target": bool(prediction < target_min or prediction > target_max),
+                    "model_family": selected.family,
+                    "target_mode": selected.target_mode,
+                    "candidate_key": selected.key,
+                }
+            )
+            predictions.append(item)
+        outer_site = str(frame.iloc[test[0]]["site"])
+        selections.append(
+            {
+                "procedure": procedure,
+                "outer_fold": outer_fold,
+                "outer_site": outer_site,
+                "candidate_key": selected.key,
+                "conformal_radius": radius,
+            }
+        )
+        if not fold_failures.empty:
+            failures.extend(
+                fold_failures.assign(
+                    procedure=procedure, outer_fold=outer_fold, outer_site=outer_site
+                ).to_dict("records")
+            )
+    result = pd.DataFrame(predictions)
+    counts = result.groupby("row_key").size()
+    if len(result) != len(frame) or not counts.eq(1).all():
+        raise ValueError(f"{procedure} did not produce exactly one outer prediction per patient")
+    return result, pd.DataFrame(selections), pd.DataFrame(failures, columns=_FAILURE_COLUMNS)
+
+
+def _run_comparators(frame: pd.DataFrame) -> pd.DataFrame:
+    y = frame["weekly_dose_mg"].to_numpy(float)
+    rows: list[dict[str, object]] = []
+    for outer_fold, (train, test) in enumerate(site_outer_splits(frame)):
+        predictions = {
+            "fixed_35_mg_week": np.full(len(test), 35.0),
+            "training_mean": np.full(len(test), float(y[train].mean())),
+            "training_median": np.full(len(test), float(np.median(y[train]))),
+            "iwpc_clinical": iwpc_clinical(frame.iloc[test]),
+            "iwpc_pharmacogenetic": iwpc_pharmacogenetic(frame.iloc[test]),
+        }
+        for procedure, values in predictions.items():
+            for position, prediction in zip(test, values, strict=True):
+                finite = bool(np.isfinite(prediction))
+                item = _prediction_row(
+                    frame,
+                    position,
+                    procedure,
+                    outer_fold,
+                    float(prediction) if finite else np.nan,
+                    status="ok" if finite else "missing_required_comparator_input",
+                )
+                item.update(
+                    {
+                        "extrapolated_target": np.nan,
+                        "model_family": np.nan,
+                        "target_mode": np.nan,
+                        "candidate_key": np.nan,
+                    }
+                )
+                rows.append(item)
+    return pd.DataFrame(rows)
+
+
+def _finite_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
+    return predictions.loc[
+        np.isfinite(predictions["y_true"].to_numpy(float))
+        & np.isfinite(predictions["y_pred"].to_numpy(float))
+    ].copy()
+
+
+def _metrics_table(predictions: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for procedure, group in _finite_predictions(predictions).groupby("procedure", sort=True):
+        metrics = regression_metrics(group["y_true"], group["y_pred"])
+        interval = group[["interval_lower", "interval_upper"]].dropna()
+        rows.append(
+            {
+                "procedure": procedure,
+                **metrics,
+                "interval_coverage": (
+                    float(
+                        ((interval["interval_lower"] <= group.loc[interval.index, "y_true"])
+                        & (group.loc[interval.index, "y_true"] <= interval["interval_upper"])
+                    ).mean()
+                    )
+                    if not interval.empty
+                    else np.nan
+                ),
+                "interval_mean_width": (
+                    float((interval["interval_upper"] - interval["interval_lower"]).mean())
+                    if not interval.empty
+                    else np.nan
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _suppressed_metrics(predictions: pd.DataFrame, column: str, label: str) -> pd.DataFrame:
+    rows = []
+    for (procedure, group), values in _finite_predictions(predictions).groupby(
+        ["procedure", column]
+    ):
+        metrics = regression_metrics(values["y_true"], values["y_pred"])
+        suppressed = metrics["n"] < 30
+        if suppressed:
+            metrics.update({key: np.nan for key in metrics if key != "n"})
+        rows.append(
+            {"procedure": procedure, label: group, "suppressed_n_lt_30": suppressed, **metrics}
+        )
+    return pd.DataFrame(rows)
+
+
+def _paired_differences(predictions: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    finite = _finite_predictions(predictions)
+    procedures = sorted(finite["procedure"].unique())
+    for index, procedure_a in enumerate(procedures):
+        left = finite.loc[
+            finite["procedure"].eq(procedure_a), ["row_key", "site", "y_true", "y_pred"]
+        ]
+        for procedure_b in procedures[index + 1 :]:
+            right = finite.loc[
+                finite["procedure"].eq(procedure_b), ["row_key", "site", "y_true", "y_pred"]
+            ]
+            paired = left.merge(
+                right,
+                on=["row_key", "site"],
+                suffixes=("_a", "_b"),
+                validate="one_to_one",
+            )
+            if paired.empty or not np.array_equal(paired["y_true_a"], paired["y_true_b"]):
+                continue
+            metrics_a = regression_metrics(paired["y_true_a"], paired["y_pred_a"])
+            metrics_b = regression_metrics(paired["y_true_b"], paired["y_pred_b"])
+            rows.append(
+                {
+                    "procedure_a": procedure_a,
+                    "procedure_b": procedure_b,
+                    "n_shared_finite": metrics_a["n"],
+                    **{
+                        f"{name}_difference": value - metrics_b[name]
+                        for name, value in metrics_a.items()
+                        if name != "n"
+                    },
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _bootstrap_table(predictions: pd.DataFrame, seed: int) -> pd.DataFrame:
+    rows = []
+    for offset, (procedure, group) in enumerate(
+        _finite_predictions(predictions).groupby("procedure", sort=True)
+    ):
+        if group["site"].nunique() >= 2:
+            rows.append(cluster_bootstrap(group, seed=seed + offset).assign(procedure=procedure))
+    return pd.concat(rows, ignore_index=True) if rows else _empty(["procedure", "iteration"])
+
+
+def _git_revision() -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def package_versions() -> dict[str, str]:
+    names = ["numpy", "pandas", "scikit-learn", "featranker", "xlrd", "joblib", "matplotlib"]
+    return {name: version(name) if _installed(name) else "not_installed" for name in names}
+
+
+def _installed(name: str) -> bool:
+    try:
+        version(name)
+    except PackageNotFoundError:
+        return False
+    return True
+
+
+def _frame_sha256(frame: pd.DataFrame) -> str:
+    return hashlib.sha256(frame.to_csv(index=False).encode()).hexdigest()
+
+
+def fit_final_model(
+    frame: pd.DataFrame,
+    feature_set: str,
+    candidates: Sequence[ModelSpec],
+    output_path: Path,
+    seed: int,
+) -> dict[str, object]:
+    columns = feature_columns(feature_set, bool(frame.attrs["include_statin"]))
+    X = select_feature_matrix(frame, columns)
+    y = frame["weekly_dose_mg"].to_numpy(float)
+    sites = frame["site"].astype(str).to_numpy()
+    scores, _ = score_candidates(X, y, sites, columns, candidates, seed)
+    selected = select_one_se(scores, candidates)
+    residuals = calibration_residuals(X, y, sites, columns, selected, seed)
+    pipeline = make_model_pipeline(columns, selected, seed)
+    pipeline.fit(X, y)
+    numeric_ranges = {
+        column: [float(X[column].min()), float(X[column].max())]
+        for column in columns
+        if column in NUMERIC_FEATURES
+    }
+    payload = {
+        "pipeline": pipeline,
+        "feature_columns": columns,
+        "feature_set": feature_set,
+        "model_spec": selected,
+        "conformal_radius": conformal_quantile(residuals, coverage=0.90),
+        "numeric_training_ranges": numeric_ranges,
+        "target_training_range": [float(y.min()), float(y.max())],
+        "source_sha256": frame.attrs.get("source_sha256", _frame_sha256(frame)),
+        "git_revision": _git_revision(),
+        "research_warning": "Research use only; not prescribing guidance or a medical device.",
+    }
+    joblib.dump(payload, output_path)
+    return payload
+
+
+def _best_feature_set(predictions: pd.DataFrame) -> str:
+    site_maes = (
+        _finite_predictions(predictions)
+        .query("procedure in ['clinical_ml', 'pharmacogenomic_ml']")
+        .assign(absolute_error=lambda values: (values["y_true"] - values["y_pred"]).abs())
+        .groupby(["procedure", "site"], as_index=False)["absolute_error"]
+        .mean()
+    )
+    summary = site_maes.groupby("procedure")["absolute_error"].agg(["mean", "std", "count"])
+    best = summary["mean"].idxmin()
+    best_se = (0.0 if pd.isna(summary.loc[best, "std"]) else summary.loc[best, "std"]) / np.sqrt(
+        summary.loc[best, "count"]
+    )
+    threshold = float(summary.loc[best, "mean"] + best_se)
+    return (
+        "clinical"
+        if summary.loc["clinical_ml", "mean"] <= threshold
+        else best.removesuffix("_ml")
+    )
+
+
+def run_primary_frame(
+    raw: pd.DataFrame,
+    output_dir: Path,
+    candidates: Sequence[ModelSpec] | None = None,
+    seed: int = DEFAULT_SEED,
+) -> Path:
+    output_dir = Path(output_dir)
+    if (output_dir / "manifest.json").exists():
+        raise FileExistsError(
+            f"refusing to overwrite existing run manifest: {output_dir / 'manifest.json'}"
+        )
+    cohort = prepare_cohort(raw)
+    frame, metadata = build_feature_frame(cohort.data)
+    frame.attrs["include_statin"] = metadata["include_statin"]
+    frame.attrs["source_sha256"] = raw.attrs.get("source_sha256", _frame_sha256(raw))
+    candidates = list(model_candidates(seed) if candidates is None else candidates)
+    if not candidates:
+        raise ValueError("primary experiment requires at least one candidate")
+    clinical_columns = feature_columns("clinical", metadata["include_statin"])
+    pharmacogenomic_columns = feature_columns("pharmacogenomic", metadata["include_statin"])
+    clinical, clinical_selections, clinical_failures = _run_learned_procedure(
+        frame, "clinical_ml", clinical_columns, candidates, seed
+    )
+    pharmacogenomic, pharmacogenomic_selections, pharmacogenomic_failures = _run_learned_procedure(
+        frame, "pharmacogenomic_ml", pharmacogenomic_columns, candidates, seed
+    )
+    predictions = pd.concat([clinical, pharmacogenomic, _run_comparators(frame)], ignore_index=True)
+    selections = pd.concat([clinical_selections, pharmacogenomic_selections], ignore_index=True)
+    failures = pd.concat([clinical_failures, pharmacogenomic_failures], ignore_index=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tables = {
+        "predictions.csv": predictions,
+        "selections.csv": selections,
+        "failures.csv": failures.reindex(columns=_FAILURE_COLUMNS),
+        "cohort_flow.csv": cohort.flow,
+        "issues.csv": cohort.issues,
+        "metrics.csv": _metrics_table(predictions),
+        "site_metrics.csv": _suppressed_metrics(predictions, "site", "site"),
+        "dose_category_metrics.csv": _suppressed_metrics(
+            predictions, "dose_category", "dose_category"
+        ),
+        "subgroup_metrics.csv": pd.concat(
+            [
+                _suppressed_metrics(predictions, column, "subgroup")
+                for column in _AUDIT_COLUMNS[:-1]
+            ],
+            keys=_AUDIT_COLUMNS[:-1],
+            names=["subgroup_type"],
+        ).reset_index(level=0),
+        "bootstrap.csv": _bootstrap_table(predictions, seed),
+        "paired_differences.csv": _paired_differences(predictions),
+    }
+    for name, table in tables.items():
+        table.to_csv(output_dir / name, index=False)
+    (output_dir / "feature_metadata.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    selected_feature_set = _best_feature_set(predictions)
+    fit_final_model(
+        frame, selected_feature_set, candidates, output_dir / "final_model.joblib", seed
+    )
+    output_files = [*tables, "feature_metadata.json", "final_model.joblib", "manifest.json"]
+    manifest = {
+        "analysis": "primary",
+        "seed": seed,
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "git_revision": _git_revision(),
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "package_versions": package_versions(),
+        "source_sha256": frame.attrs["source_sha256"],
+        "cohort_rows": len(frame),
+        "site_count": int(frame["site"].nunique()),
+        "model_grid": [
+            {
+                "candidate_key": spec.key,
+                "family": spec.family,
+                "target_mode": spec.target_mode,
+                "params": spec.params,
+            }
+            for spec in candidates
+        ],
+        "output_files": output_files,
+    }
+    (output_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return output_dir
+
+
+def run_primary_experiment(
+    raw_path: Path,
+    output_dir: Path,
+    seed: int = DEFAULT_SEED,
+    candidates: Sequence[ModelSpec] | None = None,
+) -> Path:
+    raw = read_raw(raw_path)
+    raw.attrs["source_sha256"] = sha256_file(raw_path)
+    return run_primary_frame(raw, output_dir, candidates=candidates, seed=seed)

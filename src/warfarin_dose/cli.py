@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .data import RAW_PATH, download_data, write_audit
+from .evaluation import DEFAULT_SEED, run_primary_experiment
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,6 +15,15 @@ def build_parser() -> argparse.ArgumentParser:
     audit = commands.add_parser("audit-data", help="build stable-dose cohort audit artifacts")
     audit.add_argument("--input", type=str, default=str(RAW_PATH))
     audit.add_argument("--output", type=str, default="artifacts/audit")
+    experiment = commands.add_parser("run-experiment", help="run a prespecified research analysis")
+    experiment.add_argument(
+        "--analysis",
+        choices=["primary", "feature-selection", "complete-case", "random-cv", "ablation", "all"],
+        default="primary",
+    )
+    experiment.add_argument("--input", type=str, default=str(RAW_PATH))
+    experiment.add_argument("--output", type=str, default="artifacts/run")
+    experiment.add_argument("--seed", type=int, default=DEFAULT_SEED)
     return parser
 
 
@@ -29,5 +39,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"eligible_rows: {summary['eligible_rows']}")
         print(f"sites: {summary['sites']}")
         print(f"output: {args.output}")
+        return 0
+    if args.command == "run-experiment":
+        if args.analysis != "primary":
+            raise NotImplementedError(f"analysis is not part of this build: {args.analysis}")
+        output = run_primary_experiment(Path(args.input), Path(args.output), seed=args.seed)
+        print(f"output: {output}")
         return 0
     raise AssertionError(f"unhandled command: {args.command}")
