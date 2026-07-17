@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from warfarin_dose.data import prepare_cohort
 from warfarin_dose.evaluation import (
+    _outer_statin_decisions,
     cluster_bootstrap,
     conformal_interval,
     conformal_quantile,
@@ -13,6 +15,7 @@ from warfarin_dose.evaluation import (
     select_one_se,
     site_outer_splits,
 )
+from warfarin_dose.features import build_feature_frame
 from warfarin_dose.models import ModelSpec
 
 
@@ -33,6 +36,24 @@ def test_site_splits_are_disjoint_and_cover_each_row_once():
 def test_inner_site_splits_require_three_sites():
     with pytest.raises(ValueError, match="at least three"):
         inner_site_splits(["a", "a", "b", "b"])
+
+
+def test_statin_gate_receives_outer_training_sites_only(raw_frame, monkeypatch):
+    cohort = prepare_cohort(raw_frame)
+    frame, _ = build_feature_frame(cohort.data)
+    seen_sites = []
+
+    def spy_gate(training):
+        seen_sites.append(set(training["Project Site"].astype(str)))
+        return pd.Series("Unknown", index=training.index), False, "test"
+
+    monkeypatch.setattr("warfarin_dose.evaluation.statin_gate", spy_gate)
+    decisions = _outer_statin_decisions(cohort.data, frame)
+    all_sites = set(frame["site"])
+
+    assert len(decisions) == len(all_sites)
+    for decision, training_sites in zip(decisions, seen_sites, strict=True):
+        assert training_sites == all_sites - {decision["outer_site"]}
 
 
 def test_metrics_and_dose_categories():

@@ -17,7 +17,13 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold, LeaveOneGroupOut
 
 from .data import prepare_cohort, read_raw, sha256_file
-from .features import NUMERIC_FEATURES, build_feature_frame, feature_columns, select_feature_matrix
+from .features import (
+    NUMERIC_FEATURES,
+    build_feature_frame,
+    feature_columns,
+    select_feature_matrix,
+    statin_gate,
+)
 from .models import (
     ModelSpec,
     iwpc_clinical,
@@ -364,19 +370,28 @@ def _run_learned_procedure(
     columns: Sequence[str],
     candidates: Sequence[ModelSpec],
     seed: int,
+    statin_included_by_fold: Sequence[bool] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    X = select_feature_matrix(frame, columns)
     y = frame["weekly_dose_mg"].to_numpy(float)
     predictions: list[dict[str, object]] = []
     selections: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
-    for outer_fold, (train, test) in enumerate(site_outer_splits(frame)):
+    outer_splits = site_outer_splits(frame)
+    if statin_included_by_fold is not None and len(statin_included_by_fold) != len(outer_splits):
+        raise ValueError("statin decisions must match outer folds")
+    for outer_fold, (train, test) in enumerate(outer_splits):
+        fold_columns = list(columns)
+        if statin_included_by_fold is not None:
+            fold_columns = [name for name in fold_columns if name != "statin"]
+            if statin_included_by_fold[outer_fold]:
+                fold_columns.append("statin")
+        X = select_feature_matrix(frame, fold_columns)
         training_sites = frame.iloc[train]["site"].astype(str).to_numpy()
         scores, fold_failures = score_candidates(
             X.iloc[train].reset_index(drop=True),
             y[train],
             training_sites,
-            columns,
+            fold_columns,
             candidates,
             seed + outer_fold * 100,
         )
@@ -385,12 +400,12 @@ def _run_learned_procedure(
             X.iloc[train].reset_index(drop=True),
             y[train],
             training_sites,
-            columns,
+            fold_columns,
             selected,
             seed + outer_fold * 100,
         )
         radius = conformal_quantile(residuals, coverage=0.90)
-        pipeline = make_model_pipeline(columns, selected, seed + outer_fold)
+        pipeline = make_model_pipeline(fold_columns, selected, seed + outer_fold)
         pipeline.fit(X.iloc[train], y[train])
         predicted = pipeline.predict(X.iloc[test])
         lower, upper = conformal_interval(predicted, radius)
@@ -422,6 +437,7 @@ def _run_learned_procedure(
                 "outer_site": outer_site,
                 "candidate_key": selected.key,
                 "conformal_radius": radius,
+                "statin_included": "statin" in fold_columns,
             }
         )
         if not fold_failures.empty:
@@ -649,6 +665,21 @@ def _best_feature_set(predictions: pd.DataFrame) -> str:
     )
 
 
+def _outer_statin_decisions(raw: pd.DataFrame, frame: pd.DataFrame) -> list[dict[str, object]]:
+    decisions = []
+    for outer_fold, (train, test) in enumerate(site_outer_splits(frame)):
+        _, included, reason = statin_gate(raw.iloc[train])
+        decisions.append(
+            {
+                "outer_fold": outer_fold,
+                "outer_site": str(frame.iloc[test[0]]["site"]),
+                "included": included,
+                "reason": reason,
+            }
+        )
+    return decisions
+
+
 def run_primary_frame(
     raw: pd.DataFrame,
     output_dir: Path,
@@ -667,13 +698,26 @@ def run_primary_frame(
     candidates = list(model_candidates(seed) if candidates is None else candidates)
     if not candidates:
         raise ValueError("primary experiment requires at least one candidate")
-    clinical_columns = feature_columns("clinical", metadata["include_statin"])
-    pharmacogenomic_columns = feature_columns("pharmacogenomic", metadata["include_statin"])
+    outer_statin = _outer_statin_decisions(cohort.data, frame)
+    metadata["outer_fold_statin"] = outer_statin
+    statin_included_by_fold = [bool(item["included"]) for item in outer_statin]
+    clinical_columns = feature_columns("clinical", include_statin=False)
+    pharmacogenomic_columns = feature_columns("pharmacogenomic", include_statin=False)
     clinical, clinical_selections, clinical_failures = _run_learned_procedure(
-        frame, "clinical_ml", clinical_columns, candidates, seed
+        frame,
+        "clinical_ml",
+        clinical_columns,
+        candidates,
+        seed,
+        statin_included_by_fold,
     )
     pharmacogenomic, pharmacogenomic_selections, pharmacogenomic_failures = _run_learned_procedure(
-        frame, "pharmacogenomic_ml", pharmacogenomic_columns, candidates, seed
+        frame,
+        "pharmacogenomic_ml",
+        pharmacogenomic_columns,
+        candidates,
+        seed,
+        statin_included_by_fold,
     )
     predictions = pd.concat([clinical, pharmacogenomic, _run_comparators(frame)], ignore_index=True)
     selections = pd.concat([clinical_selections, pharmacogenomic_selections], ignore_index=True)
