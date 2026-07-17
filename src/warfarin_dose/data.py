@@ -216,7 +216,10 @@ def _invalid_vkorc1_labels(values: pd.Series) -> pd.DataFrame:
 
 
 def build_audit(raw: pd.DataFrame, cohort: Cohort) -> dict[str, pd.DataFrame]:
+    from warfarin_dose.features import build_feature_frame
+
     eligible = cohort.data
+    features, feature_metadata = build_feature_frame(eligible)
     missingness = (
         eligible[REQUIRED_COLUMNS]
         .isna()
@@ -244,6 +247,63 @@ def build_audit(raw: pd.DataFrame, cohort: Cohort) -> dict[str, pd.DataFrame]:
             "n": [len(eligible), int(legacy_complete.sum())],
         }
     )
+    age_parse_failures = int(eligible["Age"].notna().sum() - features["age_decade"].notna().sum())
+    feature_quality = pd.DataFrame(
+        {
+            "measure": ["statin_decision", "statin_reason", "age_parse_failures"],
+            "value": [
+                "included" if feature_metadata["include_statin"] else "excluded",
+                feature_metadata["statin_reason"],
+                age_parse_failures,
+            ],
+        }
+    )
+    cyp2c9_source = eligible[CYP2C9_COLUMN].fillna("Missing").astype(str).str.strip()
+    vkorc1_source = eligible[VKORC1_COLUMN].fillna("Missing").astype(str).str.strip()
+    genotype_labels = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "source_feature": CYP2C9_COLUMN,
+                    "source_value": cyp2c9_source,
+                    "normalized_value": features["cyp2c9_diplotype"],
+                    "normalized_group": features["cyp2c9_group"],
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "source_feature": VKORC1_COLUMN,
+                    "source_value": vkorc1_source,
+                    "normalized_value": features["vkorc1"],
+                    "normalized_group": features["vkorc1"],
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+    genotype_labels = (
+        genotype_labels.value_counts(sort=False)
+        .rename("count")
+        .reset_index()
+        .sort_values(["source_feature", "source_value"], kind="stable")
+        .reset_index(drop=True)
+    )
+    canonical_columns = [
+        column
+        for column in features.columns
+        if column not in {"row_key", "patient_key", "site", "weekly_dose_mg"}
+    ]
+    feature_missingness = pd.DataFrame(
+        {
+            "feature": canonical_columns,
+            "missing_fraction": [
+                float(features[column].isna().mean()) for column in canonical_columns
+            ],
+            "unknown_count": [
+                int(features[column].eq("Unknown").sum()) for column in canonical_columns
+            ],
+        }
+    )
     return {
         "cohort_flow": cohort.flow,
         "exclusions": cohort.exclusions,
@@ -257,6 +317,9 @@ def build_audit(raw: pd.DataFrame, cohort: Cohort) -> dict[str, pd.DataFrame]:
         "vkorc1_observed_labels": _label_counts(eligible[VKORC1_COLUMN]),
         "cyp2c9_invalid_labels": _invalid_cyp2c9_labels(eligible[CYP2C9_COLUMN]),
         "vkorc1_invalid_labels": _invalid_vkorc1_labels(eligible[VKORC1_COLUMN]),
+        "feature_quality": feature_quality,
+        "genotype_labels": genotype_labels,
+        "feature_missingness": feature_missingness,
     }
 
 

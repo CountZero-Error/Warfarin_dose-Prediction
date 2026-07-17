@@ -122,6 +122,22 @@ def test_audit_includes_hashed_exclusions_and_genotype_label_tables(raw_frame):
     assert tables["vkorc1_invalid_labels"].to_dict("records") == [
         {"label": "not-a-vkorc1-label", "count": 1}
     ]
+    assert set(tables) >= {"feature_quality", "genotype_labels", "feature_missingness"}
+    assert set(tables["feature_quality"]["measure"]) == {
+        "statin_decision",
+        "statin_reason",
+        "age_parse_failures",
+    }
+    assert {
+        "source_feature",
+        "source_value",
+        "normalized_value",
+        "normalized_group",
+        "count",
+    } == set(tables["genotype_labels"].columns)
+    assert {"feature", "missing_fraction", "unknown_count"} == set(
+        tables["feature_missingness"].columns
+    )
 
 
 def test_audit_data_command_prints_counts_and_output_path(monkeypatch, capsys):
