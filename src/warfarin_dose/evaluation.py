@@ -702,6 +702,18 @@ def _frame_sha256(frame: pd.DataFrame) -> str:
     return hashlib.sha256(frame.to_csv(index=False).encode()).hexdigest()
 
 
+def _atomic_joblib_dump(payload: object, output_path: Path) -> None:
+    output_path = Path(output_path)
+    partial = output_path.with_suffix(output_path.suffix + ".tmp")
+    partial.unlink(missing_ok=True)
+    try:
+        joblib.dump(payload, partial)
+        partial.replace(output_path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+
+
 def fit_final_model(
     frame: pd.DataFrame,
     feature_set: str,
@@ -740,7 +752,7 @@ def fit_final_model(
         "git_revision": _git_revision(),
         "research_warning": "Research use only; not prescribing guidance or a medical device.",
     }
-    joblib.dump(payload, output_path)
+    _atomic_joblib_dump(payload, output_path)
     return payload
 
 
@@ -989,6 +1001,20 @@ def _site_mae_summary(predictions: pd.DataFrame, procedure: str) -> dict[str, fl
     }
 
 
+def _aggregate_outer_rankings(ranks: pd.DataFrame) -> pd.DataFrame:
+    aggregate = ranks.groupby("feature_block", as_index=False).agg(
+        median_rank=("median_rank", "median"),
+        mean_rank=("mean_rank", "mean"),
+        rank_std=("median_rank", "std"),
+        top5_frequency=("top5_frequency", "mean"),
+        outer_folds=("outer_fold", "nunique"),
+    )
+    aggregate["rank_std"] = aggregate["rank_std"].fillna(0.0)
+    return aggregate.sort_values(
+        ["median_rank", "mean_rank", "feature_block"]
+    ).reset_index(drop=True)
+
+
 def run_feature_selection_frame(
     raw: pd.DataFrame,
     primary_dir: Path,
@@ -1008,9 +1034,15 @@ def run_feature_selection_frame(
     primary_predictions = pd.read_csv(Path(primary_dir) / "predictions.csv")
     all_feature = _site_mae_summary(primary_predictions, "pharmacogenomic_ml")
     ranked = _site_mae_summary(predictions, "pharmacogenomic_ranked")
+    aggregate_ranks = _aggregate_outer_rankings(ranks)
+    available_columns = base_columns + (["statin"] if metadata["include_statin"] else [])
+    aggregate_ranks = aggregate_ranks.loc[
+        aggregate_ranks["feature_block"].isin(available_columns)
+    ].reset_index(drop=True)
     selected_counts = selections["feature_blocks"].map(lambda value: len(json.loads(value)))
-    ranked_blocks = int(selected_counts.median())
-    all_blocks = len(base_columns) + int(any(item["included"] for item in statin))
+    ranked_blocks = min(int(selected_counts.median()), len(aggregate_ranks))
+    selected_feature_blocks = aggregate_ranks["feature_block"].head(ranked_blocks).tolist()
+    all_blocks = len(available_columns)
     adopt = ranked["mean_site_mae_mg_week"] < all_feature["mean_site_mae_mg_week"] or (
         ranked["mean_site_mae_mg_week"]
         <= all_feature["mean_site_mae_mg_week"] + all_feature["site_mae_se_mg_week"]
@@ -1026,15 +1058,22 @@ def run_feature_selection_frame(
         "ranked": ranked,
         "ranked_block_count": ranked_blocks,
         "all_feature_block_count": all_blocks,
+        "selected_feature_blocks": selected_feature_blocks,
         "outer_predictions_frozen": True,
     }
     output_dir = _write_secondary_analysis(
         output_dir, "feature-selection", predictions, selections, failures, seed
     )
-    ranks.to_csv(output_dir / "feature_rankings.csv", index=False)
+    ranks.to_csv(output_dir / "feature_rankings_by_outer_fold.csv", index=False)
+    aggregate_ranks.to_csv(output_dir / "feature_rankings.csv", index=False)
     _write_json(output_dir / "featranker_reports.json", reports)
     _write_json(output_dir / "feature_selection_decision.json", decision)
-    return {"decision": decision, "frame": frame, "base_columns": base_columns, "ranks": ranks}
+    return {
+        "decision": decision,
+        "frame": frame,
+        "base_columns": base_columns,
+        "ranks": aggregate_ranks,
+    }
 
 
 def _complete_case_mask(frame: pd.DataFrame, columns: Sequence[str]) -> pd.Series:
@@ -1215,14 +1254,7 @@ def run_all_analyses_frame(
     run_ablation_frame(raw, output_dir / "ablation", candidates=candidates, seed=seed)
     if result["decision"]["decision"] == "adopt_ranked_subset":
         frame = result["frame"]
-        ranks = result["ranks"].sort_values(["median_rank", "mean_rank", "feature_block"])
-        selections = pd.read_csv(output_dir / "feature-selection" / "selections.csv")
-        subset_size = int(
-            pd.Series([len(json.loads(value)) for value in selections["feature_blocks"]])
-            .mode()
-            .iloc[0]
-        )
-        columns = ranks["feature_block"].drop_duplicates().head(subset_size).tolist()
+        columns = list(result["decision"]["selected_feature_blocks"])
         fit_final_model(
             frame,
             "pharmacogenomic",

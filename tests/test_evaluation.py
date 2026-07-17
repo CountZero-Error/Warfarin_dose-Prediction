@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -6,6 +7,8 @@ import pytest
 
 from warfarin_dose.data import prepare_cohort
 from warfarin_dose.evaluation import (
+    _aggregate_outer_rankings,
+    _atomic_joblib_dump,
     _outer_statin_decisions,
     cluster_bootstrap,
     conformal_interval,
@@ -206,6 +209,39 @@ def test_one_se_prefers_simpler_family_then_direct_target():
     )
 
     assert select_one_se(scores, specs) == specs[0]
+
+
+def test_outer_rank_aggregation_does_not_select_best_single_fold():
+    ranks = pd.DataFrame(
+        {
+            "feature_block": ["lucky", "lucky", "stable", "stable"],
+            "outer_fold": [0, 1, 0, 1],
+            "median_rank": [1.0, 10.0, 3.0, 3.0],
+            "mean_rank": [1.0, 10.0, 3.0, 3.0],
+            "top5_frequency": [1.0, 0.0, 1.0, 1.0],
+        }
+    )
+
+    aggregate = _aggregate_outer_rankings(ranks)
+
+    assert aggregate["feature_block"].tolist() == ["stable", "lucky"]
+    assert aggregate.set_index("feature_block").loc["lucky", "top5_frequency"] == 0.5
+
+
+def test_atomic_joblib_dump_preserves_existing_artifact_on_failure(tmp_path, monkeypatch):
+    output = tmp_path / "final_model.joblib"
+    output.write_bytes(b"existing")
+
+    def fail_dump(_payload, path):
+        Path(path).write_bytes(b"partial")
+        raise OSError("write failed")
+
+    monkeypatch.setattr("warfarin_dose.evaluation.joblib.dump", fail_dump)
+    with pytest.raises(OSError, match="write failed"):
+        _atomic_joblib_dump({"new": True}, output)
+
+    assert output.read_bytes() == b"existing"
+    assert not output.with_suffix(".joblib.tmp").exists()
 
 
 def test_primary_experiment_predicts_every_patient_once(raw_frame, tmp_path):
