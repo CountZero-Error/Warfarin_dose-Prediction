@@ -89,6 +89,8 @@ class DoseRegressor(RegressorMixin, BaseEstimator):
 
     def predict(self, X):
         prediction = np.asarray(self.estimator_.predict(X), dtype=float)
+        if not np.isfinite(prediction).all():
+            raise ValueError("model produced nonfinite weekly-dose predictions")
         prediction = np.clip(prediction, 0.0, None)
         prediction = np.square(prediction) if self.target_mode == "sqrt" else prediction
         if not np.isfinite(prediction).all():

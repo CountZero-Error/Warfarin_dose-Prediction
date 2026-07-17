@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.dummy import DummyRegressor
 
 from warfarin_dose.models import (
@@ -59,6 +60,15 @@ def test_dose_regressor_clips_before_inverse_square_root():
         X, y
     )
     assert model.predict(X).tolist() == [0.0, 0.0]
+
+
+def test_dose_regressor_rejects_nonfinite_raw_prediction():
+    X = np.array([[0.0]])
+    model = DoseRegressor(DummyRegressor()).fit(X, [1.0])
+    model.estimator_.constant_[:] = -np.inf
+
+    with pytest.raises(ValueError, match="nonfinite"):
+        model.predict(X)
 
 
 def test_candidate_grid_is_small_and_deterministic():
