@@ -38,9 +38,11 @@ Fixed 35 mg/week is a population-reference comparator, not an individual patient
 
 ## Results
 
-The verified public-data run retained 5,410 eligible patients from 21 sites. Under primary leave-one-site-out evaluation, the all-feature pharmacogenomic model achieved MAE 9.57 mg/week (90% conformal coverage 90.3%), the clinical-only model achieved MAE 11.64 mg/week, and the fixed 35 mg/week reference achieved MAE 13.23 mg/week. The published IWPC pharmacogenetic equation achieved MAE 8.65 mg/week on the smaller 4,302-patient subset with its required inputs, so its overall number is not a same-cohort replacement for the primary comparison.
+The verified public-data run retained 5,410 eligible patients from 21 sites. Under primary leave-one-site-out evaluation, the all-feature pharmacogenomic model achieved MAE 9.48 mg/week (90% conformal coverage 90.4%), the clinical-only model achieved MAE 11.69 mg/week, and the fixed 35 mg/week historical reference (5 mg/day) achieved MAE 13.23 mg/week. The published IWPC pharmacogenetic equation achieved MAE 8.65 mg/week on the smaller 4,302-patient subset with its required inputs, so its overall number is not a same-cohort replacement for the primary comparison.
 
 Leakage-safe FeatRanker selection was secondary and adopted five semantic feature blocks, with out-of-site MAE 9.38 mg/week. Random-CV MAE was 8.77 mg/week and is labeled only as an optimism comparator.
+
+The frozen evaluation was generated at revision `6ea7757e00182c164e4985838e8d406f44de5f12`. The selected five-feature final artifact was provenance-corrected and deterministically refit at revision `5c22cade700edc568fcb16ef9795cd77ae146c50` without changing the frozen outer predictions.
 
 - [Curated research report](results/README.md)
 - [Overall metrics](results/tables/overall_metrics.csv)
@@ -56,4 +58,4 @@ Hospital/site shift, rare genotypes, high doses, missingness, and stable-dose de
 
 ## Legacy archive
 
-`archive/` preserves historical notebooks and models; it is not part of the reproducible research pipeline.
+`archive/` preserves historical source code only; patient-level files, fitted models, and notebooks with embedded outputs were removed. The archive is not part of the reproducible research pipeline.

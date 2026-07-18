@@ -23,10 +23,11 @@ and conformal calibration. Selected models are recorded in
 Saved overall performance is available in [overall metrics](tables/overall_metrics.csv), [site metrics](tables/site_metrics.csv). All doses and errors are mg/week.
 
 ## Comparison with fixed and published IWPC algorithms
-The fixed 35 mg/week comparator is a population reference, not an individual recommendation.
-Published-IWPC comparator sample sizes are procedure-specific because their equations require
-complete inputs. Exact shared finite counts and paired saved-prediction comparisons are in
-[paired differences](tables/paired_differences.csv).
+The fixed 35 mg/week comparator is a historical population reference corresponding to 5 mg/day,
+not an individual recommendation. Published-IWPC comparator sample sizes are procedure-specific
+because both equations require finite age, height, and weight; their documented missing
+race/genotype terms remain supported. Exact shared finite counts and paired saved-prediction
+comparisons are in [paired differences](tables/paired_differences.csv).
 
 ## Prediction uncertainty
 Conformal interval coverage is empirical rather than guaranteed under hospital shift. See
@@ -49,8 +50,9 @@ recommendation.
 
 ## Reproducibility
 This report was generated from saved CSV/JSON artifacts; it neither fits models nor recomputes
-predictions. Analysis-code revision: `2f64d1ad8c5762e2bbf04a950d9ffbc2487116f9`. The source run
-retains a machine-readable manifest outside this curated report.
+predictions. Analysis-code revision: `6ea7757e00182c164e4985838e8d406f44de5f12`.
+Final-model revision: `5c22cade700edc568fcb16ef9795cd77ae146c50`. The source run retains a machine-readable
+manifest outside this curated report.
 
 ## Research-use warning
 Research use only; this estimate is not prescribing guidance, a medical device, or a substitute for clinician-guided INR monitoring.
