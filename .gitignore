@@ -9,5 +9,6 @@ build/
 dist/
 data/raw/
 artifacts/
+catboost_info/
 *.joblib
 .superpowers/

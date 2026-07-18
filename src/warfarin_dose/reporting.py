@@ -340,6 +340,8 @@ predictions. The run manifest is [manifest.json](../manifest.json).
 def build_report(run_dir: Path) -> Path:
     """Build deterministic research-report artifacts from a saved run only."""
     run_dir = Path(run_dir)
+    if not (run_dir / "predictions.csv").exists() and (run_dir / "primary").is_dir():
+        run_dir = run_dir / "primary"
     predictions = pd.read_csv(run_dir / "predictions.csv")
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     report_dir, tables, figures = (

@@ -56,6 +56,22 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     assert build_report(run_dir).exists()
 
 
+def test_build_report_accepts_all_analysis_root(raw_frame, tmp_path):
+    candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
+    analysis_root = tmp_path / "all-analysis"
+    primary_dir = run_primary_frame(
+        raw_frame,
+        analysis_root / "primary",
+        candidates=candidates,
+        seed=7,
+    )
+
+    report = build_report(analysis_root)
+
+    assert report == primary_dir / "report" / "report.md"
+    assert report.exists()
+
+
 def test_prediction_rejects_forbidden_unknown_and_nonfinite_inputs(raw_frame, tmp_path):
     candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
     run_dir = run_primary_frame(raw_frame, tmp_path / "run", candidates=candidates, seed=7)
