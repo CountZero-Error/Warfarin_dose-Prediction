@@ -20,7 +20,13 @@ class Response(BytesIO):
 def test_download_verifies_checksum_and_records_manifest(tmp_path, monkeypatch):
     payload = b"public-iwpc-data"
     expected = data.hashlib.sha256(payload).hexdigest()
-    monkeypatch.setattr(data.urllib.request, "urlopen", lambda *_, **__: Response(payload))
+    captured = {}
+
+    def open_download(request, **_):
+        captured["user_agent"] = request.get_header("User-agent")
+        return Response(payload)
+
+    monkeypatch.setattr(data.urllib.request, "urlopen", open_download)
 
     manifest = data.download_data(
         tmp_path / "raw.xls", expected_sha256=expected, expected_size=len(payload)
@@ -29,6 +35,7 @@ def test_download_verifies_checksum_and_records_manifest(tmp_path, monkeypatch):
     assert (tmp_path / "raw.xls").read_bytes() == payload
     assert manifest["sha256"] == expected
     assert manifest["resolved_url"].endswith("example.xls")
+    assert captured["user_agent"] == data.DOWNLOAD_USER_AGENT
     assert not (tmp_path / "raw.xls.part").exists()
 
 

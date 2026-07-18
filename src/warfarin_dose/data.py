@@ -15,6 +15,7 @@ SOURCE_URL = "https://api.pharmgkb.org/v1/download/submission/553247439"
 SOURCE_SHA256 = "0d95eacbcaf747638825c50a0c81ab1932a450b85e88a02990c98d26e7da5a6d"
 SOURCE_SIZE = 5_083_136
 RAW_PATH = Path("data/raw/PS206767-553247439.xls")
+DOWNLOAD_USER_AGENT = "warfarin-dose-research/0.1"
 
 ID_COLUMNS = ["PharmGKB Subject ID", "PharmGKB Sample ID"]
 SITE_COLUMN = "Project Site"
@@ -368,8 +369,9 @@ def download_data(
     partial = destination.with_suffix(destination.suffix + ".part")
     partial.unlink(missing_ok=True)
     resolved_url = url
+    request = urllib.request.Request(url, headers={"User-Agent": DOWNLOAD_USER_AGENT})
     try:
-        with urllib.request.urlopen(url, timeout=120) as response, partial.open("wb") as output:
+        with urllib.request.urlopen(request, timeout=120) as response, partial.open("wb") as output:
             resolved_url = response.geturl()
             while chunk := response.read(1024 * 1024):
                 output.write(chunk)
