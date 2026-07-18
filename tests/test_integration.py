@@ -11,6 +11,9 @@ from warfarin_dose.reporting import build_report, predict_patient
 def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
     run_dir = run_primary_frame(raw_frame, tmp_path / "run", candidates=candidates, seed=7)
+    stale_selections = run_dir / "report" / "tables" / "selections.csv"
+    stale_selections.parent.mkdir(parents=True)
+    stale_selections.write_text("outer_fold,outer_site\n0,1\n", encoding="utf-8")
     report = build_report(run_dir)
     patient = {
         "age_decade": 6,
@@ -37,12 +40,22 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     assert "random-CV analysis is an optimism comparator" in report_text
     assert "FeatRanker importances are noncausal" in report_text
     assert "comparator sample sizes are procedure-specific" in report_text
-    assert "[selections.csv](tables/selections.csv)" in report_text
+    assert "[selection frequencies](tables/selection_frequencies.csv)" in report_text
     assert "../manifest.json" not in report_text
     run_manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert f'Analysis-code revision: `{run_manifest["git_revision"]}`.' in report_text
     assert (run_dir / "report" / "tables" / "overall_metrics.csv").exists()
-    assert (run_dir / "report" / "tables" / "selections.csv").exists()
+    selection_frequencies = pd.read_csv(
+        run_dir / "report" / "tables" / "selection_frequencies.csv"
+    )
+    assert set(selection_frequencies) == {
+        "procedure",
+        "candidate_key",
+        "statin_included",
+        "selection_count",
+        "selection_rate",
+    }
+    assert not (run_dir / "report" / "tables" / "selections.csv").exists()
     assert (run_dir / "report" / "figures" / "observed_vs_predicted.png").exists()
     assert result["weekly_dose_mg"] >= 0
     assert result["average_daily_dose_mg"] == result["weekly_dose_mg"] / 7

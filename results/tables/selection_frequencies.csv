@@ -1,0 +1,12 @@
+procedure,candidate_key,statin_included,selection_count,selection_rate
+clinical_ml,"elasticnet|direct|alpha=0.01,l1_ratio=0.25",True,3,0.14285714285714285
+clinical_ml,"elasticnet|sqrt|alpha=0.001,l1_ratio=0.25",True,1,0.047619047619047616
+clinical_ml,"elasticnet|sqrt|alpha=0.001,l1_ratio=0.75",True,1,0.047619047619047616
+clinical_ml,ridge|direct|alpha=0.1,True,1,0.047619047619047616
+clinical_ml,ridge|direct|alpha=10.0,True,2,0.09523809523809523
+clinical_ml,ridge|sqrt|alpha=10.0,True,13,0.6190476190476191
+pharmacogenomic_ml,"elasticnet|direct|alpha=0.01,l1_ratio=0.25",True,1,0.047619047619047616
+pharmacogenomic_ml,ridge|direct|alpha=0.1,True,6,0.2857142857142857
+pharmacogenomic_ml,ridge|direct|alpha=1.0,True,1,0.047619047619047616
+pharmacogenomic_ml,ridge|direct|alpha=10.0,True,10,0.47619047619047616
+pharmacogenomic_ml,ridge|sqrt|alpha=10.0,True,3,0.14285714285714285

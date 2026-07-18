@@ -17,7 +17,7 @@ inputs are handled by the fitted preprocessing pipeline.
 ## Leakage-safe validation and model selection
 Primary results use leave-one-site-out outer validation with training-site-only model selection
 and conformal calibration. Selected models are recorded in
-[selections.csv](tables/selections.csv).
+[selection frequencies](tables/selection_frequencies.csv).
 
 ## Primary site-held-out performance
 Saved overall performance is available in [overall metrics](tables/overall_metrics.csv), [site metrics](tables/site_metrics.csv). All doses and errors are mg/week.

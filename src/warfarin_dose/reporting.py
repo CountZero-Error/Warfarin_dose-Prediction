@@ -280,6 +280,24 @@ def _copy_secondary_tables(run_dir: Path, tables: Path) -> None:
         pd.concat(rows, ignore_index=True).to_csv(tables / "sensitivity_metrics.csv", index=False)
 
 
+def _write_selection_frequencies(run_dir: Path, tables: Path) -> None:
+    legacy_split_table = tables / "selections.csv"
+    if legacy_split_table.exists():
+        legacy_split_table.unlink()
+    group_columns = ["procedure", "candidate_key", "statin_included"]
+    frequencies = (
+        pd.read_csv(run_dir / "selections.csv")
+        .groupby(group_columns, dropna=False)
+        .size()
+        .rename("selection_count")
+        .reset_index()
+    )
+    frequencies["selection_rate"] = frequencies["selection_count"] / frequencies.groupby(
+        "procedure"
+    )["selection_count"].transform("sum")
+    frequencies.to_csv(tables / "selection_frequencies.csv", index=False)
+
+
 def _manuscript(manifest: dict[str, object]) -> str:
     metric_links = (
         "[overall metrics](tables/overall_metrics.csv), [site metrics](tables/site_metrics.csv)"
@@ -303,7 +321,7 @@ inputs are handled by the fitted preprocessing pipeline.
 ## Leakage-safe validation and model selection
 Primary results use leave-one-site-out outer validation with training-site-only model selection
 and conformal calibration. Selected models are recorded in
-[selections.csv](tables/selections.csv).
+[selection frequencies](tables/selection_frequencies.csv).
 
 ## Primary site-held-out performance
 Saved overall performance is available in {metric_links}. All doses and errors are mg/week.
@@ -392,7 +410,7 @@ def build_report(run_dir: Path) -> Path:
         pd.read_csv(paired_bootstrap_path) if paired_bootstrap_path.exists() else None
     )
     overall.to_csv(tables / "overall_metrics.csv", index=False)
-    pd.read_csv(run_dir / "selections.csv").to_csv(tables / "selections.csv", index=False)
+    _write_selection_frequencies(run_dir, tables)
     site.to_csv(tables / "site_metrics.csv", index=False)
     category.to_csv(tables / "dose_category_metrics.csv", index=False)
     subgroup.to_csv(tables / "subgroup_metrics.csv", index=False)
