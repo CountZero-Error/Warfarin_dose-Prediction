@@ -27,8 +27,8 @@ repeat for every site ──> combine out-of-site predictions
 conda run -n DL python -m pip install -e '.[dev]'
 warfarin-dose download-data --output data/raw/PS206767-553247439.xls
 warfarin-dose audit-data --input data/raw/PS206767-553247439.xls --output artifacts/audit
-warfarin-dose run-experiment --analysis primary --input data/raw/PS206767-553247439.xls --output artifacts/run
-warfarin-dose build-report --run-dir artifacts/run/primary
+warfarin-dose run-experiment --analysis all --input data/raw/PS206767-553247439.xls --output artifacts/run
+warfarin-dose build-report --run-dir artifacts/run
 warfarin-dose predict --model artifacts/run/primary/final_model.joblib --input patient.json
 ```
 
@@ -38,7 +38,17 @@ Fixed 35 mg/week is a population-reference comparator, not an individual patient
 
 ## Results
 
-Run-specific links are generated after a verified public-data run: `artifacts/run/primary/report/report.md`, its tables, and its figures. No public-run performance claim is made here before that run exists.
+The verified public-data run retained 5,410 eligible patients from 21 sites. Under primary leave-one-site-out evaluation, the all-feature pharmacogenomic model achieved MAE 9.57 mg/week (90% conformal coverage 90.3%), the clinical-only model achieved MAE 11.64 mg/week, and the fixed 35 mg/week reference achieved MAE 13.23 mg/week. The published IWPC pharmacogenetic equation achieved MAE 8.65 mg/week on the smaller 4,302-patient subset with its required inputs, so its overall number is not a same-cohort replacement for the primary comparison.
+
+Leakage-safe FeatRanker selection was secondary and adopted five semantic feature blocks, with out-of-site MAE 9.38 mg/week. Random-CV MAE was 8.77 mg/week and is labeled only as an optimism comparator.
+
+- [Curated research report](results/README.md)
+- [Overall metrics](results/tables/overall_metrics.csv)
+- [Paired bootstrap comparisons](results/tables/paired_differences.csv)
+- [Sensitivity analyses](results/tables/sensitivity_metrics.csv)
+- [Feature stability](results/tables/feature_stability.csv)
+- [Observed versus predicted figure](results/figures/observed_vs_predicted.png)
+- [Site-level MAE figure](results/figures/mae_by_site.png)
 
 ## Limitations and research-use warning
 

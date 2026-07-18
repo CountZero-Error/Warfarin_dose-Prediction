@@ -33,7 +33,14 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     result = predict_patient(run_dir / "final_model.joblib", input_path)
 
     assert report.exists()
+    report_text = report.read_text(encoding="utf-8")
+    assert "random-CV analysis is an optimism comparator" in report_text
+    assert "FeatRanker importances are noncausal" in report_text
+    assert "comparator sample sizes are procedure-specific" in report_text
+    assert "[selections.csv](tables/selections.csv)" in report_text
+    assert "../manifest.json" not in report_text
     assert (run_dir / "report" / "tables" / "overall_metrics.csv").exists()
+    assert (run_dir / "report" / "tables" / "selections.csv").exists()
     assert (run_dir / "report" / "figures" / "observed_vs_predicted.png").exists()
     assert result["weekly_dose_mg"] >= 0
     assert result["average_daily_dose_mg"] == result["weekly_dose_mg"] / 7

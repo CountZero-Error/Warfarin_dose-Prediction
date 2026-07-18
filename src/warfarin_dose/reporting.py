@@ -302,14 +302,17 @@ inputs are handled by the fitted preprocessing pipeline.
 
 ## Leakage-safe validation and model selection
 Primary results use leave-one-site-out outer validation with training-site-only model selection
-and conformal calibration. Selected models are recorded in [selections.csv](../selections.csv).
+and conformal calibration. Selected models are recorded in
+[selections.csv](tables/selections.csv).
 
 ## Primary site-held-out performance
 Saved overall performance is available in {metric_links}. All doses and errors are mg/week.
 
 ## Comparison with fixed and published IWPC algorithms
 The fixed 35 mg/week comparator is a population reference, not an individual recommendation.
-Paired saved-prediction comparisons are in [paired differences](tables/paired_differences.csv).
+Published-IWPC comparator sample sizes are procedure-specific because their equations require
+complete inputs. Exact shared finite counts and paired saved-prediction comparisons are in
+[paired differences](tables/paired_differences.csv).
 
 ## Prediction uncertainty
 Conformal interval coverage is empirical rather than guaranteed under hospital shift. See
@@ -317,7 +320,9 @@ Conformal interval coverage is empirical rather than guaranteed under hospital s
 
 ## Feature stability, ablations, and sensitivity analyses
 Feature ranking, ablation, and sensitivity tables are included only when corresponding saved
-analysis artifacts exist. Permutation importance is associational and correlation-sensitive.
+analysis artifacts exist. FeatRanker importances are noncausal, associational, and
+correlation-sensitive. The random-CV analysis is an optimism comparator, not primary evidence;
+the site-held-out analysis remains primary.
 
 ## Subgroup and site audit
 Subgroup, site, and dose-category metrics are suppressed when n < 30. Race is an audit field,
@@ -330,7 +335,7 @@ recommendation.
 
 ## Reproducibility
 This report was generated from saved CSV/JSON artifacts; it neither fits models nor recomputes
-predictions. The run manifest is [manifest.json](../manifest.json).
+predictions. The source run retains a machine-readable manifest outside this curated report.
 
 ## Research-use warning
 {RESEARCH_WARNING}
@@ -386,6 +391,7 @@ def build_report(run_dir: Path) -> Path:
         pd.read_csv(paired_bootstrap_path) if paired_bootstrap_path.exists() else None
     )
     overall.to_csv(tables / "overall_metrics.csv", index=False)
+    pd.read_csv(run_dir / "selections.csv").to_csv(tables / "selections.csv", index=False)
     site.to_csv(tables / "site_metrics.csv", index=False)
     category.to_csv(tables / "dose_category_metrics.csv", index=False)
     subgroup.to_csv(tables / "subgroup_metrics.csv", index=False)
