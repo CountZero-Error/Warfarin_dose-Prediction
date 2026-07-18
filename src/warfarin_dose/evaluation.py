@@ -1279,14 +1279,22 @@ def run_all_analyses_frame(
     if result["decision"]["decision"] == "adopt_ranked_subset":
         frame = result["frame"]
         columns = list(result["decision"]["selected_feature_blocks"])
-        fit_final_model(
+        frame.attrs["source_sha256"] = raw.attrs.get("source_sha256", _frame_sha256(raw))
+        payload = fit_final_model(
             frame,
-            "pharmacogenomic",
+            "pharmacogenomic_ranked",
             candidates,
             primary_dir / "final_model.joblib",
             seed,
             columns,
         )
+        manifest_path = primary_dir / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["final_feature_set"] = payload["feature_set"]
+        manifest["final_feature_columns"] = payload["feature_columns"]
+        manifest["final_model_git_revision"] = payload["git_revision"]
+        manifest["final_model_source_sha256"] = payload["source_sha256"]
+        _write_json(manifest_path, manifest)
     return output_dir
 
 
@@ -1393,7 +1401,9 @@ def run_primary_frame(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     final_feature_set = _best_feature_set(predictions)
-    fit_final_model(frame, final_feature_set, candidates, output_dir / "final_model.joblib", seed)
+    final_payload = fit_final_model(
+        frame, final_feature_set, candidates, output_dir / "final_model.joblib", seed
+    )
     output_files = [*tables, "feature_metadata.json", "final_model.joblib", "manifest.json"]
     manifest = {
         "analysis": "primary",
@@ -1407,6 +1417,9 @@ def run_primary_frame(
         "cohort_rows": len(frame),
         "site_count": int(frame["site"].nunique()),
         "final_feature_set": final_feature_set,
+        "final_feature_columns": final_payload["feature_columns"],
+        "final_model_git_revision": final_payload["git_revision"],
+        "final_model_source_sha256": final_payload["source_sha256"],
         "model_grid": [
             {
                 "candidate_key": spec.key,

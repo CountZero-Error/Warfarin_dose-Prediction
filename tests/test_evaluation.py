@@ -284,15 +284,23 @@ def test_primary_final_artifact_uses_one_se_feature_set(raw_frame, tmp_path, mon
     def fake_fit_final_model(frame, feature_set, candidates, output_path, seed, columns=None):
         captured.update(feature_set=feature_set, columns=columns)
         Path(output_path).write_bytes(b"model")
-        return {}
+        return {
+            "feature_columns": ["age_decade"],
+            "git_revision": "model-revision",
+            "source_sha256": "model-source",
+        }
 
     monkeypatch.setattr(evaluation, "_best_feature_set", lambda _: "clinical")
     monkeypatch.setattr(evaluation, "fit_final_model", fake_fit_final_model)
     candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
 
-    evaluation.run_primary_frame(raw_frame, tmp_path, candidates=candidates, seed=7)
+    output = evaluation.run_primary_frame(raw_frame, tmp_path, candidates=candidates, seed=7)
 
     assert captured == {"feature_set": "clinical", "columns": None}
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["final_feature_columns"] == ["age_decade"]
+    assert manifest["final_model_git_revision"] == "model-revision"
+    assert manifest["final_model_source_sha256"] == "model-source"
 
 
 def test_random_cv_uses_fold_local_statin_gate(raw_frame, tmp_path, monkeypatch):
@@ -369,6 +377,64 @@ def test_secondary_analyses_are_separate_and_keep_complete_case_from_final_model
     assert not complete_selections["statin_included"].any()
     ablation_metrics = pd.read_csv(tmp_path / "ablation" / "metrics.csv")
     assert not ablation_metrics["procedure"].str.contains("ablation_ranked_").any()
+
+
+def test_ranked_adoption_updates_final_artifact_provenance(tmp_path, monkeypatch):
+    from warfarin_dose import evaluation
+
+    raw = pd.DataFrame({"placeholder": [1]})
+    raw.attrs["source_sha256"] = "public-source-checksum"
+    primary_dir = tmp_path / "primary"
+    primary_dir.mkdir()
+    (primary_dir / "manifest.json").write_text(
+        json.dumps({"final_feature_set": "pharmacogenomic"}), encoding="utf-8"
+    )
+    ranked_frame = pd.DataFrame({"weekly_dose_mg": [35.0]})
+    captured = {}
+
+    monkeypatch.setattr(evaluation, "run_primary_frame", lambda *_args, **_kwargs: primary_dir)
+    monkeypatch.setattr(
+        evaluation,
+        "run_feature_selection_frame",
+        lambda *_args, **_kwargs: {
+            "decision": {
+                "decision": "adopt_ranked_subset",
+                "selected_feature_blocks": ["weight_kg", "vkorc1"],
+            },
+            "frame": ranked_frame,
+        },
+    )
+    monkeypatch.setattr(evaluation, "run_complete_case_frame", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(evaluation, "run_random_cv_frame", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(evaluation, "run_ablation_frame", lambda *_args, **_kwargs: None)
+
+    def fake_fit(frame, feature_set, candidates, output_path, seed, columns=None):
+        captured.update(
+            feature_set=feature_set,
+            columns=columns,
+            source_sha256=frame.attrs.get("source_sha256"),
+        )
+        return {
+            "feature_set": feature_set,
+            "feature_columns": list(columns),
+            "git_revision": "final-model-revision",
+            "source_sha256": frame.attrs["source_sha256"],
+        }
+
+    monkeypatch.setattr(evaluation, "fit_final_model", fake_fit)
+
+    evaluation.run_all_analyses_frame(raw, tmp_path, candidates=[], seed=7)
+
+    assert captured == {
+        "feature_set": "pharmacogenomic_ranked",
+        "columns": ["weight_kg", "vkorc1"],
+        "source_sha256": "public-source-checksum",
+    }
+    manifest = json.loads((primary_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["final_feature_set"] == "pharmacogenomic_ranked"
+    assert manifest["final_feature_columns"] == ["weight_kg", "vkorc1"]
+    assert manifest["final_model_git_revision"] == "final-model-revision"
+    assert manifest["final_model_source_sha256"] == "public-source-checksum"
 
 
 def test_run_experiment_defaults_to_primary_analysis():
