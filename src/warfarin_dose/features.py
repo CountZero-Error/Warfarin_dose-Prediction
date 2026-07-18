@@ -132,8 +132,8 @@ def statin_gate(raw: pd.DataFrame) -> tuple[pd.Series, bool, str]:
     mapping_fraction = mapped / observed if observed else 0.0
     known = composite[composite.ne("Unknown")]
     prevalence = known.value_counts(normalize=True)
-    class_ok = {"Yes", "No"}.issubset(prevalence.index) and prevalence.min() >= 0.01
-    include = nonmissing_fraction >= 0.50 and mapping_fraction >= 0.95 and class_ok
+    class_ok = bool({"Yes", "No"}.issubset(prevalence.index) and prevalence.min() >= 0.01)
+    include = bool(nonmissing_fraction >= 0.50 and mapping_fraction >= 0.95 and class_ok)
     reason = (
         "included"
         if include

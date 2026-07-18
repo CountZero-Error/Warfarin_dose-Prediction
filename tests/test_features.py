@@ -45,6 +45,7 @@ def test_missing_binary_is_unknown_and_inducer_is_prespecified(raw_frame):
 
 def test_primary_feature_sets_exclude_race_site_and_outcomes(raw_frame):
     frame, metadata = build_feature_frame(raw_frame)
+    assert isinstance(metadata["include_statin"], bool)
     columns = feature_columns("pharmacogenomic", metadata["include_statin"])
     matrix = select_feature_matrix(frame, columns)
 
