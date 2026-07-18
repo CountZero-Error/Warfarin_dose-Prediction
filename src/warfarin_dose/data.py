@@ -15,6 +15,7 @@ SOURCE_URL = "https://api.pharmgkb.org/v1/download/submission/553247439"
 SOURCE_SHA256 = "0d95eacbcaf747638825c50a0c81ab1932a450b85e88a02990c98d26e7da5a6d"
 SOURCE_SIZE = 5_083_136
 RAW_PATH = Path("data/raw/PS206767-553247439.xls")
+SOURCE_SHEET = "Subject Data"
 DOWNLOAD_USER_AGENT = "warfarin-dose-research/0.1"
 
 ID_COLUMNS = ["PharmGKB Subject ID", "PharmGKB Sample ID"]
@@ -105,7 +106,7 @@ def validate_schema(raw: pd.DataFrame) -> None:
 def read_raw(path: Path = RAW_PATH) -> pd.DataFrame:
     if sha256_file(path) != SOURCE_SHA256:
         raise ValueError("raw IWPC checksum does not match the reviewed dataset version")
-    raw = pd.read_excel(path, engine="xlrd")
+    raw = pd.read_excel(path, sheet_name=SOURCE_SHEET, engine="xlrd")
     validate_schema(raw)
     return raw
 

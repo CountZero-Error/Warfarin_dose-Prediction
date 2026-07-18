@@ -82,6 +82,25 @@ def test_download_data_command_uses_downloader_without_network(monkeypatch, caps
     assert capsys.readouterr().out == "verified verified at custom.xls\n"
 
 
+def test_read_raw_uses_reviewed_subject_data_sheet(raw_frame, tmp_path, monkeypatch):
+    path = tmp_path / "raw.xls"
+    path.write_bytes(b"reviewed")
+    captured = {}
+
+    monkeypatch.setattr(data, "sha256_file", lambda _: data.SOURCE_SHA256)
+
+    def read_excel(input_path, *, sheet_name, engine):
+        captured.update(path=input_path, sheet_name=sheet_name, engine=engine)
+        return raw_frame
+
+    monkeypatch.setattr(data.pd, "read_excel", read_excel)
+
+    result = data.read_raw(path)
+
+    assert result is raw_frame
+    assert captured == {"path": path, "sheet_name": "Subject Data", "engine": "xlrd"}
+
+
 def test_cohort_uses_stable_positive_weekly_dose_and_site(raw_frame):
     raw = raw_frame.copy()
     raw.loc[0, "Subject Reached Stable Dose of Warfarin"] = 0
