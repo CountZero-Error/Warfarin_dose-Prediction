@@ -302,6 +302,9 @@ def _manuscript(manifest: dict[str, object]) -> str:
     metric_links = (
         "[overall metrics](tables/overall_metrics.csv), [site metrics](tables/site_metrics.csv)"
     )
+    final_model_revision = manifest.get(
+        "final_model_git_revision", manifest.get("git_revision", "unknown")
+    )
     return f"""# Site-Aware Warfarin Dose Prediction from Public IWPC Data
 
 ## Research question
@@ -354,8 +357,9 @@ recommendation.
 
 ## Reproducibility
 This report was generated from saved CSV/JSON artifacts; it neither fits models nor recomputes
-predictions. Analysis-code revision: `{manifest.get("git_revision", "unknown")}`. The source run
-retains a machine-readable manifest outside this curated report.
+predictions. Analysis-code revision: `{manifest.get("git_revision", "unknown")}`.
+Final-model revision: `{final_model_revision}`. The source run retains a machine-readable
+manifest outside this curated report.
 
 ## Research-use warning
 {RESEARCH_WARNING}
@@ -367,7 +371,7 @@ def build_report(run_dir: Path) -> Path:
     run_dir = Path(run_dir)
     if not (run_dir / "predictions.csv").exists() and (run_dir / "primary").is_dir():
         run_dir = run_dir / "primary"
-    predictions = pd.read_csv(run_dir / "predictions.csv")
+    predictions = pd.read_csv(run_dir / "predictions.csv", low_memory=False)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     report_dir, tables, figures = (
         run_dir / "report",

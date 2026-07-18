@@ -15,6 +15,10 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     stale_selections = run_dir / "report" / "tables" / "selections.csv"
     stale_selections.parent.mkdir(parents=True)
     stale_selections.write_text("outer_fold,outer_site\n0,1\n", encoding="utf-8")
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["final_model_git_revision"] = "separate-final-model-revision"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     report = build_report(run_dir)
     artifact = joblib.load(run_dir / "final_model.joblib")
     patient = {
@@ -46,6 +50,7 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     assert "../manifest.json" not in report_text
     run_manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert f'Analysis-code revision: `{run_manifest["git_revision"]}`.' in report_text
+    assert "Final-model revision: `separate-final-model-revision`." in report_text
     assert (run_dir / "report" / "tables" / "overall_metrics.csv").exists()
     selection_frequencies = pd.read_csv(
         run_dir / "report" / "tables" / "selection_frequencies.csv"
