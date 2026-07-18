@@ -116,6 +116,17 @@ def test_cohort_uses_stable_positive_weekly_dose_and_site(raw_frame):
     assert "PharmGKB Subject ID" not in cohort.exclusions.columns
 
 
+def test_cohort_rejects_blank_and_whitespace_only_sites(raw_frame):
+    raw = raw_frame.copy()
+    raw.loc[0, "Project Site"] = ""
+    raw.loc[1, "Project Site"] = "   "
+
+    cohort = data.prepare_cohort(raw)
+
+    assert len(cohort.data) == len(raw) - 2
+    assert cohort.exclusions["reason"].eq("missing_site").sum() == 2
+
+
 def test_unusual_positive_dose_is_audited_not_removed(raw_frame):
     raw = raw_frame.copy()
     raw.loc[0, "Therapeutic Dose of Warfarin"] = 315.0

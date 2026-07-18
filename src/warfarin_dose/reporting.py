@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .evaluation import dose_category, regression_metrics
-from .features import NUMERIC_FEATURES, PHARMACOGENOMIC_FEATURES
+from .features import NUMERIC_FEATURES
 
 RESEARCH_WARNING = (
     "Research use only; this estimate is not prescribing guidance, a medical device, "
@@ -327,10 +327,11 @@ and conformal calibration. Selected models are recorded in
 Saved overall performance is available in {metric_links}. All doses and errors are mg/week.
 
 ## Comparison with fixed and published IWPC algorithms
-The fixed 35 mg/week comparator is a population reference, not an individual recommendation.
-Published-IWPC comparator sample sizes are procedure-specific because their equations require
-complete inputs. Exact shared finite counts and paired saved-prediction comparisons are in
-[paired differences](tables/paired_differences.csv).
+The fixed 35 mg/week comparator is a historical population reference corresponding to 5 mg/day,
+not an individual recommendation. Published-IWPC comparator sample sizes are procedure-specific
+because both equations require finite age, height, and weight; their documented missing
+race/genotype terms remain supported. Exact shared finite counts and paired saved-prediction
+comparisons are in [paired differences](tables/paired_differences.csv).
 
 ## Prediction uncertainty
 Conformal interval coverage is empirical rather than guaranteed under hospital shift. See
@@ -430,10 +431,12 @@ def build_report(run_dir: Path) -> Path:
 
 def predict_patient(model_path: Path, input_path: Path) -> dict[str, object]:
     artifact = joblib.load(model_path)
+    expected = list(artifact["feature_columns"])
+    categorical_training_values = artifact["categorical_training_values"]
     patient = json.loads(Path(input_path).read_text(encoding="utf-8"))
     if not isinstance(patient, dict):
         raise ValueError("inference input must be a JSON object")
-    allowed = set(PHARMACOGENOMIC_FEATURES) | {"statin"}
+    allowed = set(expected)
     forbidden = {"weekly_dose_mg", "site", "row_key", "race"}
     unknown = sorted(set(patient) - allowed - forbidden)
     supplied_forbidden = sorted(set(patient) & forbidden)
@@ -452,8 +455,12 @@ def predict_patient(model_path: Path, input_path: Path) -> dict[str, object]:
             patient[name] = value
     for name in set(patient) - set(NUMERIC_FEATURES):
         if patient[name] is not None:
-            patient[name] = str(patient[name])
-    expected = artifact["feature_columns"]
+            patient[name] = str(patient[name]).strip()
+            accepted = categorical_training_values[name]
+            if patient[name] not in accepted:
+                raise ValueError(
+                    f"unseen categorical input: {name}={patient[name]!r}; accepted={accepted}"
+                )
     missing = [name for name in expected if name not in patient or patient[name] is None]
     row = pd.DataFrame([{name: patient.get(name, np.nan) for name in expected}])
     prediction = max(0.0, float(artifact["pipeline"].predict(row)[0]))

@@ -6,11 +6,11 @@ This project uses the public IWPC workbook distributed by PharmGKB at <https://a
 
 ## Cohort and sites
 
-The eligible cohort requires a recorded stable-dose flag, finite positive therapeutic weekly dose, and project site. The original public data are expected to contain 21 sites for audit; this is an expectation to check, not a guaranteed property of any derived subset. Stable-dose distributions and missingness may differ across sites.
+The eligible cohort requires a recorded stable-dose flag, finite positive therapeutic weekly dose, and nonblank project site. Site labels are stripped before grouping. The original public data are expected to contain 21 sites for audit; this is an expectation to check, not a guaranteed property of any derived subset. Stable-dose distributions and missingness may differ across sites.
 
 ## Identifiers, missingness, and sensitive fields
 
-Subject/sample identifiers are used only to construct internal deduplication and split keys; they are never learned features or inference inputs. Missing clinical and genotype values are retained for pipeline imputation/audit rather than silently complete-case filtered in the primary analysis. CYP2C9 and VKORC1 labels are normalized with unknown/no-call values retained as such. Race is retained only as an audit field and excluded from learned inputs.
+Subject/sample identifiers are used only to construct internal deduplication and split keys; they are never learned features or inference inputs. Missing clinical and genotype values are retained for pipeline imputation/audit rather than silently complete-case filtered in the primary analysis. Composite medication exposure is `Yes` when any component is yes, `No` only when every component is observed no, and `Unknown` otherwise. CYP2C9 and VKORC1 labels are normalized with unknown/no-call values retained as such. Race is retained only as an audit field and excluded from learned inputs.
 
 ## Data handling
 

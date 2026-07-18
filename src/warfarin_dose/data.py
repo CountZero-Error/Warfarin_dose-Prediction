@@ -140,7 +140,8 @@ def prepare_cohort(raw: pd.DataFrame) -> Cohort:
     target = pd.to_numeric(raw[TARGET_COLUMN], errors="coerce")
     stable = pd.to_numeric(raw[STABLE_COLUMN], errors="coerce").eq(1)
     finite_positive = pd.Series(np.isfinite(target) & target.gt(0), index=raw.index)
-    has_site = raw[SITE_COLUMN].notna()
+    normalized_site = raw[SITE_COLUMN].astype("string").str.strip()
+    has_site = normalized_site.notna() & normalized_site.ne("")
     reason = np.select(
         [~stable, ~finite_positive, ~has_site],
         ["not_stable", "invalid_target", "missing_site"],
@@ -152,7 +153,7 @@ def prepare_cohort(raw: pd.DataFrame) -> Cohort:
     data = raw.loc[eligible].copy()
     data.insert(0, "row_key", keys.loc[eligible].to_numpy())
     data.insert(1, "patient_key", patient_keys.loc[eligible].to_numpy())
-    data["site"] = data[SITE_COLUMN].astype(str)
+    data["site"] = normalized_site.loc[eligible].astype(str)
     data["weekly_dose_mg"] = target.loc[eligible].astype(float)
     exclusions = pd.DataFrame({"row_key": keys.loc[~eligible], "reason": reason[~eligible]})
     flow = pd.DataFrame(

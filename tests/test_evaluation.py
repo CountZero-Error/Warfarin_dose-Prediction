@@ -258,6 +258,64 @@ def test_primary_experiment_predicts_every_patient_once(raw_frame, tmp_path):
     assert learned[["interval_lower", "interval_upper"]].notna().all().all()
 
 
+def test_primary_reuse_requires_matching_provenance(raw_frame, tmp_path):
+    from warfarin_dose import evaluation
+
+    candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
+    primary = evaluation.run_primary_frame(
+        raw_frame, tmp_path / "primary", candidates=candidates, seed=7
+    )
+
+    evaluation.validate_primary_run(raw_frame, primary, seed=7)
+    manifest_path = primary / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["seed"] = 8
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="seed"):
+        evaluation.validate_primary_run(raw_frame, primary, seed=7)
+
+
+def test_primary_final_artifact_uses_one_se_feature_set(raw_frame, tmp_path, monkeypatch):
+    from warfarin_dose import evaluation
+
+    captured = {}
+
+    def fake_fit_final_model(frame, feature_set, candidates, output_path, seed, columns=None):
+        captured.update(feature_set=feature_set, columns=columns)
+        Path(output_path).write_bytes(b"model")
+        return {}
+
+    monkeypatch.setattr(evaluation, "_best_feature_set", lambda _: "clinical")
+    monkeypatch.setattr(evaluation, "fit_final_model", fake_fit_final_model)
+    candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
+
+    evaluation.run_primary_frame(raw_frame, tmp_path, candidates=candidates, seed=7)
+
+    assert captured == {"feature_set": "clinical", "columns": None}
+
+
+def test_random_cv_uses_fold_local_statin_gate(raw_frame, tmp_path, monkeypatch):
+    from warfarin_dose import evaluation
+
+    gate_calls = []
+
+    def include_statin(training):
+        gate_calls.append(set(training.index))
+        return pd.Series("Unknown", index=training.index), True, "test"
+
+    monkeypatch.setattr(evaluation, "statin_gate", include_statin)
+    candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
+
+    output = evaluation.run_random_cv_frame(
+        raw_frame, tmp_path, candidates=candidates, seed=7
+    )
+    selections = pd.read_csv(output / "selections.csv")
+
+    assert len(gate_calls) == 10
+    assert selections["statin_included"].all()
+
+
 def test_secondary_analyses_are_separate_and_keep_complete_case_from_final_model(
     raw_frame, tmp_path, monkeypatch
 ):
@@ -288,6 +346,11 @@ def test_secondary_analyses_are_separate_and_keep_complete_case_from_final_model
             }
 
     monkeypatch.setattr(evaluation, "FeatureRanker", SpyRanker)
+    monkeypatch.setattr(
+        evaluation,
+        "statin_gate",
+        lambda training: (pd.Series("Unknown", index=training.index), True, "test"),
+    )
     candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
 
     result = evaluation.run_all_analyses_frame(raw_frame, tmp_path, candidates=candidates, seed=7)
@@ -302,6 +365,10 @@ def test_secondary_analyses_are_separate_and_keep_complete_case_from_final_model
     assert random_manifest["analysis_label"] == "optimism_comparator"
     complete_case = json.loads((tmp_path / "complete-case" / "manifest.json").read_text())
     assert complete_case["selects_primary_artifact"] is False
+    complete_selections = pd.read_csv(tmp_path / "complete-case" / "selections.csv")
+    assert not complete_selections["statin_included"].any()
+    ablation_metrics = pd.read_csv(tmp_path / "ablation" / "metrics.csv")
+    assert not ablation_metrics["procedure"].str.contains("ablation_ranked_").any()
 
 
 def test_run_experiment_defaults_to_primary_analysis():

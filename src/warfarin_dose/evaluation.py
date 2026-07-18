@@ -766,6 +766,11 @@ def fit_final_model(
         for column in columns
         if column in NUMERIC_FEATURES
     }
+    categorical_training_values = {
+        column: sorted(X[column].dropna().astype(str).unique().tolist())
+        for column in columns
+        if column not in NUMERIC_FEATURES
+    }
     payload = {
         "pipeline": pipeline,
         "feature_columns": columns,
@@ -773,6 +778,7 @@ def fit_final_model(
         "model_spec": selected,
         "conformal_radius": conformal_quantile(residuals, coverage=0.90),
         "numeric_training_ranges": numeric_ranges,
+        "categorical_training_values": categorical_training_values,
         "target_training_range": [float(y.min()), float(y.max())],
         "source_sha256": frame.attrs.get("source_sha256", _frame_sha256(frame)),
         "git_revision": _git_revision(),
@@ -816,6 +822,12 @@ def _outer_statin_decisions(raw: pd.DataFrame, frame: pd.DataFrame) -> list[dict
             }
         )
     return decisions
+
+
+def _statin_included_for_splits(
+    raw: pd.DataFrame, splits: Sequence[tuple[np.ndarray, np.ndarray]]
+) -> list[bool]:
+    return [bool(statin_gate(raw.iloc[train])[1]) for train, _ in splits]
 
 
 def _json_default(value: object) -> object:
@@ -1124,7 +1136,6 @@ def run_complete_case_frame(
     base_columns = feature_columns("pharmacogenomic", include_statin=False)
     mask = _complete_case_mask(frame, base_columns)
     complete_frame = frame.loc[mask].reset_index(drop=True)
-    complete_raw = cohort.data.loc[mask].reset_index(drop=True)
     retained = complete_frame.groupby("site").size().rename("complete_case_n").to_dict()
     totals = frame.groupby("site").size().rename("eligible_n").to_dict()
     counts = {
@@ -1140,14 +1151,15 @@ def run_complete_case_frame(
         ],
     }
     candidates = list(model_candidates(seed) if candidates is None else candidates)
-    statin = _outer_statin_decisions(complete_raw, complete_frame)
+    outer_splits = site_outer_splits(complete_frame)
     predictions, selections, failures = _run_learned_procedure(
         complete_frame,
         "pharmacogenomic_complete_case",
         base_columns,
         candidates,
         seed,
-        [bool(item["included"]) for item in statin],
+        [False] * len(outer_splits),
+        outer_splits=outer_splits,
     )
     output_dir = _write_secondary_analysis(
         output_dir, "complete-case", predictions, selections, failures, seed
@@ -1169,13 +1181,16 @@ def run_random_cv_frame(
     frame, metadata = build_feature_frame(cohort.data)
     frame.attrs["include_statin"] = metadata["include_statin"]
     candidates = list(model_candidates(seed) if candidates is None else candidates)
+    outer_splits = random_outer_splits(len(frame), seed)
+    statin_included_by_fold = _statin_included_for_splits(cohort.data, outer_splits)
     predictions, selections, failures = _run_learned_procedure(
         frame,
         "pharmacogenomic_random_cv",
         feature_columns("pharmacogenomic", include_statin=False),
         candidates,
         seed,
-        outer_splits=random_outer_splits(len(frame), seed),
+        statin_included_by_fold,
+        outer_splits=outer_splits,
         inner_mode="random",
         analysis_label="optimism_comparator",
     )
@@ -1202,18 +1217,6 @@ def run_ablation_frame(
     candidates = list(model_candidates(seed) if candidates is None else candidates)
     base_columns = feature_columns("pharmacogenomic", include_statin=False)
     statin = _outer_statin_decisions(cohort.data, frame)
-    global_columns = base_columns + (["statin"] if metadata["include_statin"] else [])
-    global_ranks, reports = rank_feature_blocks(
-        select_feature_matrix(frame, global_columns),
-        frame["weekly_dose_mg"].to_numpy(float),
-        frame["site"].astype(str).to_numpy(),
-        global_columns,
-        seed,
-    )
-    ranked_blocks = global_ranks.loc[
-        global_ranks["median_rank"].le(5) & global_ranks["top5_frequency"].ge(0.70),
-        "feature_block",
-    ].head(3).tolist()
     blocks = {
         "demographics": ["age_decade", "gender"],
         "anthropometrics": ["height_cm", "weight_kg"],
@@ -1226,7 +1229,6 @@ def run_ablation_frame(
         ],
         "medications": ["amiodarone", "enzyme_inducer", "smoker", "statin"],
         "pharmacogenomics": ["cyp2c9_group", "vkorc1"],
-        **{f"ranked_{block}": [block] for block in ranked_blocks},
     }
     all_predictions: list[pd.DataFrame] = []
     all_selections: list[pd.DataFrame] = []
@@ -1255,11 +1257,7 @@ def run_ablation_frame(
         pd.concat(all_failures, ignore_index=True),
         seed,
     )
-    global_ranks.to_csv(output_dir / "feature_rankings.csv", index=False)
-    _write_json(output_dir / "featranker_reports.json", reports)
-    _write_json(
-        output_dir / "ablation_plan.json", {"blocks": blocks, "ranked_blocks": ranked_blocks}
-    )
+    _write_json(output_dir / "ablation_plan.json", {"blocks": blocks})
     return output_dir
 
 
@@ -1296,6 +1294,31 @@ def run_all_analyses(raw_path: Path, output_dir: Path, seed: int = DEFAULT_SEED)
     raw = read_raw(raw_path)
     raw.attrs["source_sha256"] = sha256_file(raw_path)
     return run_all_analyses_frame(raw, output_dir, seed=seed)
+
+
+def validate_primary_run(raw: pd.DataFrame, primary_dir: Path, seed: int) -> None:
+    primary_dir = Path(primary_dir)
+    manifest = json.loads((primary_dir / "manifest.json").read_text(encoding="utf-8"))
+    cohort = prepare_cohort(raw)
+    expected_source = raw.attrs.get("source_sha256", _frame_sha256(raw))
+    problems = []
+    if manifest.get("source_sha256") != expected_source:
+        problems.append("source checksum")
+    if manifest.get("seed") != seed:
+        problems.append("seed")
+    if manifest.get("git_revision") != _git_revision():
+        problems.append("git revision")
+    if manifest.get("cohort_rows") != len(cohort.data):
+        problems.append("cohort size")
+    predictions = pd.read_csv(
+        primary_dir / "predictions.csv", usecols=["row_key", "procedure"], low_memory=False
+    )
+    learned = predictions.loc[predictions["procedure"].eq("clinical_ml"), "row_key"]
+    expected_keys = set(cohort.data["row_key"].astype(str))
+    if learned.duplicated().any() or set(learned.astype(str)) != expected_keys:
+        problems.append("patient-key coverage")
+    if problems:
+        raise ValueError(f"incompatible primary run: {', '.join(problems)}")
 
 
 def run_primary_frame(
@@ -1369,9 +1392,8 @@ def run_primary_frame(
     (output_dir / "feature_metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    fit_final_model(
-        frame, "pharmacogenomic", candidates, output_dir / "final_model.joblib", seed
-    )
+    final_feature_set = _best_feature_set(predictions)
+    fit_final_model(frame, final_feature_set, candidates, output_dir / "final_model.joblib", seed)
     output_files = [*tables, "feature_metadata.json", "final_model.joblib", "manifest.json"]
     manifest = {
         "analysis": "primary",
@@ -1384,6 +1406,7 @@ def run_primary_frame(
         "source_sha256": frame.attrs["source_sha256"],
         "cohort_rows": len(frame),
         "site_count": int(frame["site"].nunique()),
+        "final_feature_set": final_feature_set,
         "model_grid": [
             {
                 "candidate_key": spec.key,

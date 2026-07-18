@@ -43,6 +43,19 @@ def test_missing_binary_is_unknown_and_inducer_is_prespecified(raw_frame):
     assert frame.loc[2, "diabetes"] in {"Yes", "No", "Unknown"}
 
 
+def test_composite_binary_requires_all_observed_components_for_no(raw_frame):
+    raw = raw_frame.iloc[:2].copy()
+    columns = ["Carbamazepine (Tegretol)", "Phenytoin (Dilantin)", "Rifampin or Rifampicin"]
+    raw[columns] = raw[columns].astype(object)
+    raw.loc[:, columns] = np.nan
+    raw.loc[0, columns[0]] = 0
+    raw.loc[1, columns] = 0
+
+    frame, _ = build_feature_frame(raw)
+
+    assert frame["enzyme_inducer"].tolist() == ["Unknown", "No"]
+
+
 def test_primary_feature_sets_exclude_race_site_and_outcomes(raw_frame):
     frame, metadata = build_feature_frame(raw_frame)
     assert isinstance(metadata["include_statin"], bool)

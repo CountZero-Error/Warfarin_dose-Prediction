@@ -1,5 +1,6 @@
 import json
 
+import joblib
 import pandas as pd
 import pytest
 
@@ -15,12 +16,13 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     stale_selections.parent.mkdir(parents=True)
     stale_selections.write_text("outer_fold,outer_site\n0,1\n", encoding="utf-8")
     report = build_report(run_dir)
+    artifact = joblib.load(run_dir / "final_model.joblib")
     patient = {
         "age_decade": 6,
         "gender": "Female",
         "height_cm": 165,
         "weight_kg": 70,
-        "indication": "7",
+        "indication": artifact["categorical_training_values"]["indication"][0],
         "target_inr": 2.5,
         "diabetes": "No",
         "chf_cardiomyopathy": "No",
@@ -28,8 +30,6 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
         "amiodarone": "No",
         "enzyme_inducer": "No",
         "smoker": "No",
-        "cyp2c9_group": "Normal",
-        "vkorc1": "G/G",
     }
     input_path = tmp_path / "patient.json"
     input_path.write_text(json.dumps(patient), encoding="utf-8")
@@ -40,6 +40,8 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     assert "random-CV analysis is an optimism comparator" in report_text
     assert "FeatRanker importances are noncausal" in report_text
     assert "comparator sample sizes are procedure-specific" in report_text
+    assert "historical population reference corresponding to 5 mg/day" in report_text
+    assert "finite age, height, and weight" in report_text
     assert "[selection frequencies](tables/selection_frequencies.csv)" in report_text
     assert "../manifest.json" not in report_text
     run_manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -94,7 +96,10 @@ def test_build_report_accepts_all_analysis_root(raw_frame, tmp_path):
     assert report.exists()
 
 
-def test_prediction_rejects_forbidden_unknown_and_nonfinite_inputs(raw_frame, tmp_path):
+def test_prediction_rejects_forbidden_unknown_and_nonfinite_inputs(
+    raw_frame, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("warfarin_dose.evaluation._best_feature_set", lambda _: "clinical")
     candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
     run_dir = run_primary_frame(raw_frame, tmp_path / "run", candidates=candidates, seed=7)
     input_path = tmp_path / "patient.json"
@@ -109,4 +114,24 @@ def test_prediction_rejects_forbidden_unknown_and_nonfinite_inputs(raw_frame, tm
 
     input_path.write_text('{"weight_kg": NaN}', encoding="utf-8")
     with pytest.raises(ValueError, match="nonfinite"):
+        predict_patient(run_dir / "final_model.joblib", input_path)
+
+    artifact = joblib.load(run_dir / "final_model.joblib")
+    assert set(artifact["categorical_training_values"]) == {
+        name
+        for name in artifact["feature_columns"]
+        if name not in {"age_decade", "height_cm", "weight_kg", "target_inr"}
+    }
+
+    input_path.write_text(json.dumps({"gender": "not-a-category"}), encoding="utf-8")
+    with pytest.raises(ValueError, match="unseen categorical input"):
+        predict_patient(run_dir / "final_model.joblib", input_path)
+
+    unused = next(
+        name
+        for name in ["statin", "vkorc1", "cyp2c9_group"]
+        if name not in artifact["feature_columns"]
+    )
+    input_path.write_text(json.dumps({unused: "Unknown"}), encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown"):
         predict_patient(run_dir / "final_model.joblib", input_path)

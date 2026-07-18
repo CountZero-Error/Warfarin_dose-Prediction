@@ -83,7 +83,7 @@ def combine_binary(frame: pd.DataFrame, columns: Sequence[str]) -> pd.Series:
         np.where(
             normalized.eq("Yes").any(axis=1),
             "Yes",
-            np.where(normalized.eq("No").any(axis=1), "No", "Unknown"),
+            np.where(normalized.eq("No").all(axis=1), "No", "Unknown"),
         ),
         index=frame.index,
     )

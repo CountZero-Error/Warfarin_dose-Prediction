@@ -229,10 +229,9 @@ Prespecified block ablations compare:
 - height and weight;
 - clinical conditions;
 - medication exposures;
-- pharmacogenomics;
-- individual stable feature blocks identified by FeatRanker.
+- pharmacogenomics.
 
-Ablations use the same nested site-aware evaluation. Outer results are not used iteratively to invent new ablations.
+Ablations use the same nested site-aware evaluation. Outer results are not used iteratively to invent new ablations. FeatRanker stability is reported separately; individual-block ablations identified after observing this cohort are excluded from confirmatory results and require a separately preregistered analysis.
 
 ### 9.2 Metrics
 

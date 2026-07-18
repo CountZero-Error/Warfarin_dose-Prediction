@@ -13,6 +13,7 @@ from .evaluation import (
     run_feature_selection_frame,
     run_primary_experiment,
     run_random_cv_frame,
+    validate_primary_run,
 )
 from .reporting import build_report, predict_patient
 
@@ -67,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             primary = root / "primary"
             if not (primary / "manifest.json").exists():
                 run_primary_experiment(Path(args.input), primary, seed=args.seed)
+            validate_primary_run(raw, primary, args.seed)
             runners = {
                 "feature-selection": lambda: run_feature_selection_frame(
                     raw, primary, root / "feature-selection", seed=args.seed
