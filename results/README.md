@@ -49,7 +49,8 @@ recommendation.
 
 ## Reproducibility
 This report was generated from saved CSV/JSON artifacts; it neither fits models nor recomputes
-predictions. The source run retains a machine-readable manifest outside this curated report.
+predictions. Analysis-code revision: `2f64d1ad8c5762e2bbf04a950d9ffbc2487116f9`. The source run
+retains a machine-readable manifest outside this curated report.
 
 ## Research-use warning
 Research use only; this estimate is not prescribing guidance, a medical device, or a substitute for clinician-guided INR monitoring.

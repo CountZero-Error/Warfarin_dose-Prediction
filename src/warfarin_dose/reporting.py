@@ -335,7 +335,8 @@ recommendation.
 
 ## Reproducibility
 This report was generated from saved CSV/JSON artifacts; it neither fits models nor recomputes
-predictions. The source run retains a machine-readable manifest outside this curated report.
+predictions. Analysis-code revision: `{manifest.get("git_revision", "unknown")}`. The source run
+retains a machine-readable manifest outside this curated report.
 
 ## Research-use warning
 {RESEARCH_WARNING}

@@ -39,6 +39,8 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     assert "comparator sample sizes are procedure-specific" in report_text
     assert "[selections.csv](tables/selections.csv)" in report_text
     assert "../manifest.json" not in report_text
+    run_manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert f'Analysis-code revision: `{run_manifest["git_revision"]}`.' in report_text
     assert (run_dir / "report" / "tables" / "overall_metrics.csv").exists()
     assert (run_dir / "report" / "tables" / "selections.csv").exists()
     assert (run_dir / "report" / "figures" / "observed_vs_predicted.png").exists()
