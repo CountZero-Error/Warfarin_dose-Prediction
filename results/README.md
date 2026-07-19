@@ -39,6 +39,12 @@ analysis artifacts exist. FeatRanker importances are noncausal, associational, a
 correlation-sensitive. The random-CV analysis is an optimism comparator, not primary evidence;
 the site-held-out analysis remains primary.
 
+The held-out ranked-subset metrics evaluate a nested fold-wise ranking procedure; outer folds may
+select different feature blocks. They are not performance of the static full-cohort refit.
+Final artifact label: `pharmacogenomic_ranked`. Final artifact inputs: `vkorc1`, `weight_kg`, `age_decade`, `cyp2c9_group`, `height_cm`.
+Final-model source SHA-256: `0d95eacbcaf747638825c50a0c81ab1932a450b85e88a02990c98d26e7da5a6d`.
+
+
 ## Subgroup and site audit
 Subgroup, site, and dose-category metrics are suppressed when n < 30. Race is an audit field,
 not a learned input.
