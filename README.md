@@ -1,61 +1,175 @@
-# Warfarin Dose Research Rebuild
+<div align="center">
 
-This biomedical-informatics research project asks whether pre-treatment clinical and pharmacogenomic information can estimate a patient's stable warfarin dose when tested on a previously unseen clinical site. It is a reproducible, research-only analysis of public IWPC data—not a prescribing tool.
+# Site-Aware Warfarin Dose Prediction
 
-## Dose unit
+**Leakage-safe clinical machine learning on public pharmacogenomic data**
 
-Weekly mg/week is the canonical target and reporting unit. The displayed average daily dose is exactly `weekly_dose_mg / 7`; it is not a separately modeled outcome.
+[![Tests](https://github.com/CountZero-Error/Warfarin_dose-Prediction/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/CountZero-Error/Warfarin_dose-Prediction/actions/workflows/tests.yml)
+![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.13-3776AB?logo=python&logoColor=white)
+![Data](https://img.shields.io/badge/data-public%20IWPC-0b7285)
+![Status](https://img.shields.io/badge/status-research%20only-6f42c1)
 
-## Public data
+Can pre-treatment clinical and pharmacogenomic data estimate stable warfarin dose for patients from a **previously unseen clinical site**?
 
-The input is the public International Warfarin Pharmacogenetics Consortium (IWPC) workbook distributed through PharmGKB: <https://api.pharmgkb.org/v1/download/submission/553247439>. The reviewed workbook SHA-256 is `0d95eacbcaf747638825c50a0c81ab1932a450b85e88a02990c98d26e7da5a6d`.
+[Results](results/README.md) · [Data card](docs/DATA_CARD.md) · [Model card](docs/MODEL_CARD.md) · [Reproduce](#reproduce-the-study)
 
-## Cohort and features
+</div>
 
-Eligible records have a stable, positive therapeutic dose and a site. Learned models use pre-treatment clinical features with optional CYP2C9/VKORC1 features; dose, post-treatment INR, identifiers, site, and race are forbidden predictors. Missing expected predictors are imputed inside each fitted pipeline.
+> [!CAUTION]
+> **Research use only.** This project is not prescribing guidance, a medical device, or a substitute for clinician-guided INR monitoring.
 
-## Validation
+## At a glance
 
-```text
-hold out site S ──> train/select/calibrate on all other sites ──> evaluate once on S
-repeat for every site ──> combine out-of-site predictions
+| Study | Design |
+|---|---|
+| **Public cohort** | 5,410 eligible patients from 21 sites |
+| **Prediction target** | Stable therapeutic dose in mg/week |
+| **Primary validation** | Leave-one-site-out evaluation |
+| **Best primary ML result** | 9.48 mg/week MAE |
+| **Nested ranked procedure** | 9.38 mg/week MAE |
+| **Final artifact inputs** | VKORC1, CYP2C9, weight, age, height |
+
+## Why site-aware evaluation?
+
+Random train/test splits mix patients from the same clinical sites and produced an optimistic MAE of **8.77 mg/week**. The primary design instead holds out one entire site at a time, approximating deployment into a hospital unseen during training.
+
+```mermaid
+flowchart LR
+    A["Public IWPC data"] --> B["Eligibility and leakage audit"]
+    B --> C["Hold out one clinical site"]
+    C --> D["Train, select, and calibrate on other sites"]
+    D --> E["Evaluate once on held-out site"]
+    E --> F["Repeat across all 21 sites"]
+    F --> G["Aggregate out-of-site evidence"]
 ```
 
-## Setup and commands
-
-```bash
-conda run -n DL python -m pip install -e '.[dev]'
-warfarin-dose download-data --output data/raw/PS206767-553247439.xls
-warfarin-dose audit-data --input data/raw/PS206767-553247439.xls --output artifacts/audit
-warfarin-dose run-experiment --analysis all --input data/raw/PS206767-553247439.xls --output artifacts/run
-warfarin-dose build-report --run-dir artifacts/run
-warfarin-dose predict --model artifacts/run/primary/final_model.joblib --input patient.json
-```
-
-## Comparators and analyses
-
-Fixed 35 mg/week is a population-reference comparator, not an individual patient dose. The primary analysis evaluates all-feature clinical and pharmacogenomic models with site-held-out validation. Feature selection, complete-case, random-CV, and ablation analyses are secondary and do not replace the primary analysis.
+All preprocessing, model selection, feature ranking, and conformal calibration are fitted without access to the outer test site.
 
 ## Results
 
-The verified public-data run retained 5,410 eligible patients from 21 sites. Under primary leave-one-site-out evaluation, the all-feature pharmacogenomic model achieved MAE 9.48 mg/week (90% conformal coverage 90.4%), the clinical-only model achieved MAE 11.69 mg/week, and the fixed 35 mg/week historical reference (5 mg/day) achieved MAE 13.23 mg/week. The published IWPC pharmacogenetic equation achieved MAE 8.65 mg/week on the smaller 4,302-patient subset with its required inputs, so its overall number is not a same-cohort replacement for the primary comparison.
+| Procedure | Evaluation cohort | MAE ↓ | Interpretation |
+|---|---:|---:|---|
+| Published IWPC pharmacogenetic equation | 4,302 | **8.65** | Smaller subset with required inputs; not directly comparable |
+| Nested FeatRanker procedure | 5,410 | **9.38** | Secondary fold-wise feature-selection analysis |
+| Pharmacogenomic ML | 5,410 | **9.48** | Primary all-feature model; 90.4% conformal coverage |
+| Clinical-only ML | 5,410 | **11.69** | No genotype inputs |
+| Fixed 35 mg/week reference | 5,410 | **13.23** | Historical population comparator, not an individual dose |
 
-The nested fold-wise FeatRanker procedure achieved out-of-site MAE 9.38 mg/week; each outer training fold selected its own ranked subset. The separately refitted final artifact uses the aggregate-ranked static inputs `vkorc1`, `weight_kg`, `age_decade`, `cyp2c9_group`, and `height_cm`. The 9.38 value evaluates the nested procedure, not that static full-cohort refit. Random-CV MAE was 8.77 mg/week and is labeled only as an optimism comparator.
+All errors are reported in **mg/week**. The displayed daily equivalent is always `weekly_dose_mg / 7`, never a separately modeled outcome.
 
-The frozen evaluation was generated at sanitized revision `7ea3e03dc5b2bedea4e0af48421c0e6474c24283`. The selected five-feature final artifact was provenance-corrected and deterministically refit at sanitized revision `ec753167d82242a8c176f3f2f7b1e09ad4a22dea` without changing the frozen outer predictions.
+![Aggregate observed versus predicted calibration](results/figures/observed_vs_predicted.png)
 
-- [Curated research report](results/README.md)
+<details>
+<summary><strong>View performance across the 21 held-out sites</strong></summary>
+
+![MAE by held-out clinical site](results/figures/mae_by_site.png)
+
+</details>
+
+Detailed aggregate evidence is available in the [research report](results/README.md):
+
 - [Overall metrics](results/tables/overall_metrics.csv)
 - [Paired bootstrap comparisons](results/tables/paired_differences.csv)
 - [Sensitivity analyses](results/tables/sensitivity_metrics.csv)
 - [Feature stability](results/tables/feature_stability.csv)
-- [Observed versus predicted figure](results/figures/observed_vs_predicted.png)
-- [Site-level MAE figure](results/figures/mae_by_site.png)
 
-## Limitations and research-use warning
+## Features and leakage controls
 
-Hospital/site shift, rare genotypes, high doses, missingness, and stable-dose definition differences may limit generalization. **Research use only: estimates are not prescribing guidance, a medical device, or a substitute for clinician-guided INR monitoring.**
+The final static research artifact uses five aggregate-ranked inputs:
 
-## Legacy archive
+```text
+vkorc1 · cyp2c9_group · weight_kg · age_decade · height_cm
+```
 
-`archive/` preserves historical source code only; patient-level files, fitted models, and notebooks with embedded outputs were removed. The archive is not part of the reproducible research pipeline.
+The nested **9.38 mg/week** result evaluates fold-specific ranked subsets: every outer training fold performs its own FeatRanker analysis. It must not be interpreted as measured performance of the separately refitted five-feature artifact.
+
+Dose, post-treatment INR, identifiers, clinical site, and race are forbidden predictors. Race is retained only for subgroup auditing. Missing expected predictors are imputed inside each fitted pipeline.
+
+## Reproduce the study
+
+### 1. Install
+
+```bash
+git clone https://github.com/CountZero-Error/Warfarin_dose-Prediction.git
+cd Warfarin_dose-Prediction
+conda run -n DL python -m pip install -e '.[dev]'
+```
+
+Python 3.11 and 3.13 are tested in CI.
+
+### 2. Download and verify the public data
+
+```bash
+warfarin-dose download-data --output data/raw/PS206767-553247439.xls
+warfarin-dose audit-data \
+  --input data/raw/PS206767-553247439.xls \
+  --output artifacts/audit
+```
+
+Source: [PharmGKB IWPC submission](https://api.pharmgkb.org/v1/download/submission/553247439)
+
+```text
+SHA-256  0d95eacbcaf747638825c50a0c81ab1932a450b85e88a02990c98d26e7da5a6d
+```
+
+### 3. Run every analysis and build the report
+
+```bash
+warfarin-dose run-experiment \
+  --analysis all \
+  --input data/raw/PS206767-553247439.xls \
+  --output artifacts/run
+
+warfarin-dose build-report --run-dir artifacts/run
+```
+
+### 4. Verify the code
+
+```bash
+python -m pytest
+ruff check src tests
+python -m build
+```
+
+## Scientific safeguards
+
+- **Site-held-out evidence:** the primary result measures transport across clinical sites.
+- **Training-only selection:** model and feature selection never inspect the outer test site.
+- **Uncertainty reporting:** empirical 90% conformal intervals accompany the primary models.
+- **Privacy-aware publication:** curated results contain aggregate tables and calibration bins, not patient-level predictions.
+- **Transparent sensitivity work:** random-CV, complete-case, ablation, and feature-selection analyses remain secondary.
+- **Auditable artifacts:** source checksum, configurations, manifests, and revision provenance are recorded.
+
+## Limitations
+
+Performance may not transport to new healthcare systems, data-collection practices, patient populations, rare CYP2C9/VKORC1 genotypes, or high-dose ranges. Conformal coverage is empirical and is not guaranteed after distribution shift. FeatRanker permutation importance is associational, correlation-sensitive, and not causal evidence.
+
+## Repository guide
+
+```text
+src/warfarin_dose/   analysis package and CLI
+tests/               data, leakage, model, and integration checks
+results/             curated aggregate evidence and figures
+docs/DATA_CARD.md    cohort, source, and governance details
+docs/MODEL_CARD.md   intended use, evaluation, and limitations
+archive/             historical source code only
+```
+
+<details>
+<summary><strong>Frozen-run provenance</strong></summary>
+
+- Evaluation revision: `7ea3e03dc5b2bedea4e0af48421c0e6474c24283`
+- Final-artifact revision: `ec753167d82242a8c176f3f2f7b1e09ad4a22dea`
+- Final artifact label: `pharmacogenomic_ranked`
+
+The final artifact was deterministically refitted without changing the frozen outer predictions.
+
+</details>
+
+---
+
+<div align="center">
+
+Built as a reproducible biomedical-informatics study using only publicly downloadable data.
+
+</div>
