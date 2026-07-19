@@ -164,36 +164,41 @@ def _write_figure(path: Path, draw) -> None:
         plt.close(figure)
 
 
+def _binned_calibration(predictions: pd.DataFrame, bins: int = 10) -> pd.DataFrame:
+    values = predictions[["procedure", "y_true", "y_pred"]].dropna().copy()
+    groups = min(bins, int(values["y_true"].nunique()))
+    if groups > 1:
+        values["_bin"] = pd.qcut(values["y_true"], groups, duplicates="drop")
+    else:
+        values["_bin"] = "all"
+    return (
+        values.groupby(["procedure", "_bin"], observed=True)
+        .agg(observed=("y_true", "mean"), predicted=("y_pred", "mean"), n=("y_true", "size"))
+        .reset_index()
+        .drop(columns="_bin")
+    )
+
+
 def _report_figures(predictions: pd.DataFrame, figures: Path, ranks: pd.DataFrame | None) -> None:
     finite = _finite_predictions(predictions)
 
     def observed(axis):
         procedures = ["clinical_ml", "pharmacogenomic_ml", "iwpc_pharmacogenetic"]
-        paired = (
-            finite.loc[finite["procedure"].isin(procedures)]
-            .pivot(index="row_key", columns="procedure", values=["y_true", "y_pred"])
-            .dropna()
-        )
-        required = {
-            (value, procedure)
-            for value in ["y_true", "y_pred"]
-            for procedure in procedures
-        }
-        if paired.empty or not required.issubset(paired.columns):
-            axis.text(0.5, 0.5, "No finite paired predictions", ha="center", va="center")
+        summary = _binned_calibration(finite.loc[finite["procedure"].isin(procedures)])
+        if summary.empty:
+            axis.text(0.5, 0.5, "No finite predictions", ha="center", va="center")
         else:
-            values = paired["y_true"].to_numpy().ravel()
-            lower, upper = float(values.min()), float(values.max())
             for procedure in procedures:
-                axis.scatter(
-                    paired[("y_true", procedure)],
-                    paired[("y_pred", procedure)],
-                    s=12,
-                    label=procedure,
-                )
+                values = summary.loc[summary["procedure"].eq(procedure)]
+                axis.plot(values["observed"], values["predicted"], marker="o", label=procedure)
+            lower = float(summary[["observed", "predicted"]].min().min())
+            upper = float(summary[["observed", "predicted"]].max().max())
             axis.plot([lower, upper], [lower, upper], "k--", label="identity")
             axis.legend(fontsize=8)
-        axis.set(xlabel="Observed weekly dose (mg/week)", ylabel="Predicted weekly dose (mg/week)")
+        axis.set(
+            xlabel="Mean observed weekly dose by bin (mg/week)",
+            ylabel="Mean predicted weekly dose by bin (mg/week)",
+        )
 
     def site_mae(axis):
         values = finite.loc[
@@ -305,6 +310,18 @@ def _manuscript(manifest: dict[str, object]) -> str:
     final_model_revision = manifest.get(
         "final_model_git_revision", manifest.get("git_revision", "unknown")
     )
+    ranked_note = ""
+    if manifest.get("final_feature_set") == "pharmacogenomic_ranked":
+        columns = ", ".join(
+            f"`{column}`" for column in manifest.get("final_feature_columns", [])
+        )
+        ranked_note = f"""
+
+The held-out ranked-subset metrics evaluate a nested fold-wise ranking procedure; outer folds may
+select different feature blocks. They are not performance of the static full-cohort refit.
+Final artifact label: `pharmacogenomic_ranked`. Final artifact inputs: {columns}.
+Final-model source SHA-256: `{manifest.get("final_model_source_sha256", "unknown")}`.
+"""
     return f"""# Site-Aware Warfarin Dose Prediction from Public IWPC Data
 
 ## Research question
@@ -344,7 +361,7 @@ Conformal interval coverage is empirical rather than guaranteed under hospital s
 Feature ranking, ablation, and sensitivity tables are included only when corresponding saved
 analysis artifacts exist. FeatRanker importances are noncausal, associational, and
 correlation-sensitive. The random-CV analysis is an optimism comparator, not primary evidence;
-the site-held-out analysis remains primary.
+the site-held-out analysis remains primary.{ranked_note}
 
 ## Subgroup and site audit
 Subgroup, site, and dose-category metrics are suppressed when n < 30. Race is an audit field,

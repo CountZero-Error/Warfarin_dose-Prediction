@@ -523,7 +523,8 @@ def _run_learned_procedure(
                 }
             )
             predictions.append(item)
-        outer_site = str(frame.iloc[test[0]]["site"])
+        test_sites = frame.iloc[test]["site"].astype(str).unique()
+        outer_site = str(test_sites[0]) if len(test_sites) == 1 else "mixed"
         selections.append(
             {
                 "procedure": procedure,
@@ -864,6 +865,7 @@ def _write_secondary_analysis(
     *,
     analysis_label: str = "site_held_out",
     extra: dict[str, object] | None = None,
+    additional_output_files: Sequence[str] = (),
 ) -> Path:
     output_dir = _new_analysis_dir(output_dir)
     tables = {
@@ -885,12 +887,20 @@ def _write_secondary_analysis(
         "analysis_label": analysis_label,
         "seed": seed,
         "git_revision": _git_revision(),
-        "output_files": [*tables, "manifest.json"],
+        "output_files": [*tables, *additional_output_files, "manifest.json"],
     }
     if extra:
         manifest.update(extra)
     _write_json(output_dir / "manifest.json", manifest)
     return output_dir
+
+
+def _secondary_provenance(raw: pd.DataFrame, frame: pd.DataFrame) -> dict[str, object]:
+    return {
+        "source_sha256": raw.attrs.get("source_sha256", _frame_sha256(raw)),
+        "cohort_rows": len(frame),
+        "site_count": int(frame["site"].nunique()),
+    }
 
 
 def _subset_summary(
@@ -1060,6 +1070,7 @@ def run_feature_selection_frame(
     candidates: Sequence[ModelSpec] | None = None,
     seed: int = DEFAULT_SEED,
 ) -> dict[str, object]:
+    validate_primary_run(raw, primary_dir, seed)
     cohort = prepare_cohort(raw)
     frame, metadata = build_feature_frame(cohort.data)
     frame.attrs["include_statin"] = metadata["include_statin"]
@@ -1099,13 +1110,33 @@ def run_feature_selection_frame(
         "selected_feature_blocks": selected_feature_blocks,
         "outer_predictions_frozen": True,
     }
-    output_dir = _write_secondary_analysis(
-        output_dir, "feature-selection", predictions, selections, failures, seed
-    )
+    output_dir = _new_analysis_dir(output_dir)
     ranks.to_csv(output_dir / "feature_rankings_by_outer_fold.csv", index=False)
     aggregate_ranks.to_csv(output_dir / "feature_rankings.csv", index=False)
     _write_json(output_dir / "featranker_reports.json", reports)
     _write_json(output_dir / "feature_selection_decision.json", decision)
+    primary_manifest = json.loads(
+        (Path(primary_dir) / "manifest.json").read_text(encoding="utf-8")
+    )
+    output_dir = _write_secondary_analysis(
+        output_dir,
+        "feature-selection",
+        predictions,
+        selections,
+        failures,
+        seed,
+        extra={
+            **_secondary_provenance(raw, frame),
+            "primary_git_revision": primary_manifest["git_revision"],
+            "primary_source_sha256": primary_manifest["source_sha256"],
+        },
+        additional_output_files=(
+            "feature_rankings_by_outer_fold.csv",
+            "feature_rankings.csv",
+            "featranker_reports.json",
+            "feature_selection_decision.json",
+        ),
+    )
     return {
         "decision": decision,
         "frame": frame,
@@ -1161,14 +1192,18 @@ def run_complete_case_frame(
         [False] * len(outer_splits),
         outer_splits=outer_splits,
     )
-    output_dir = _write_secondary_analysis(
-        output_dir, "complete-case", predictions, selections, failures, seed
-    )
+    output_dir = _new_analysis_dir(output_dir)
     _write_json(output_dir / "cohort_counts.json", counts)
-    manifest = json.loads((output_dir / "manifest.json").read_text())
-    manifest["selects_primary_artifact"] = False
-    _write_json(output_dir / "manifest.json", manifest)
-    return output_dir
+    return _write_secondary_analysis(
+        output_dir,
+        "complete-case",
+        predictions,
+        selections,
+        failures,
+        seed,
+        extra={**_secondary_provenance(raw, frame), "selects_primary_artifact": False},
+        additional_output_files=("cohort_counts.json",),
+    )
 
 
 def run_random_cv_frame(
@@ -1202,6 +1237,7 @@ def run_random_cv_frame(
         failures,
         seed,
         analysis_label="optimism_comparator",
+        extra=_secondary_provenance(raw, frame),
     )
 
 
@@ -1249,16 +1285,18 @@ def run_ablation_frame(
         all_predictions.append(predictions)
         all_selections.append(selections.assign(ablation=name, removed_blocks=json.dumps(removed)))
         all_failures.append(failures)
-    output_dir = _write_secondary_analysis(
+    output_dir = _new_analysis_dir(output_dir)
+    _write_json(output_dir / "ablation_plan.json", {"blocks": blocks})
+    return _write_secondary_analysis(
         output_dir,
         "ablation",
         pd.concat(all_predictions, ignore_index=True),
         pd.concat(all_selections, ignore_index=True),
         pd.concat(all_failures, ignore_index=True),
         seed,
+        extra=_secondary_provenance(raw, frame),
+        additional_output_files=("ablation_plan.json",),
     )
-    _write_json(output_dir / "ablation_plan.json", {"blocks": blocks})
-    return output_dir
 
 
 def run_all_analyses_frame(
@@ -1319,12 +1357,30 @@ def validate_primary_run(raw: pd.DataFrame, primary_dir: Path, seed: int) -> Non
     if manifest.get("cohort_rows") != len(cohort.data):
         problems.append("cohort size")
     predictions = pd.read_csv(
-        primary_dir / "predictions.csv", usecols=["row_key", "procedure"], low_memory=False
+        primary_dir / "predictions.csv",
+        usecols=["row_key", "procedure", "site", "y_true"],
+        low_memory=False,
     )
-    learned = predictions.loc[predictions["procedure"].eq("clinical_ml"), "row_key"]
-    expected_keys = set(cohort.data["row_key"].astype(str))
-    if learned.duplicated().any() or set(learned.astype(str)) != expected_keys:
-        problems.append("patient-key coverage")
+    expected = cohort.data.set_index(cohort.data["row_key"].astype(str))[
+        ["site", "weekly_dose_mg"]
+    ]
+    expected_keys = set(expected.index)
+    for procedure in ("clinical_ml", "pharmacogenomic_ml"):
+        learned = predictions.loc[predictions["procedure"].eq(procedure)].copy()
+        learned["row_key"] = learned["row_key"].astype(str)
+        if learned["row_key"].duplicated().any() or set(learned["row_key"]) != expected_keys:
+            problems.append(f"{procedure} patient-key coverage")
+            continue
+        learned = learned.set_index("row_key").loc[expected.index]
+        if not learned["site"].astype(str).eq(expected["site"].astype(str)).all():
+            problems.append(f"{procedure} site match")
+        if not np.allclose(
+            learned["y_true"].to_numpy(float),
+            expected["weekly_dose_mg"].to_numpy(float),
+            rtol=0,
+            atol=1e-12,
+        ):
+            problems.append(f"{procedure} target match")
     if problems:
         raise ValueError(f"incompatible primary run: {', '.join(problems)}")
 

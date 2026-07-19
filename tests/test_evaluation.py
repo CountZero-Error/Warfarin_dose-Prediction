@@ -276,6 +276,53 @@ def test_primary_reuse_requires_matching_provenance(raw_frame, tmp_path):
         evaluation.validate_primary_run(raw_frame, primary, seed=7)
 
 
+def test_primary_reuse_rejects_corrupted_learned_predictions(raw_frame, tmp_path):
+    from warfarin_dose import evaluation
+
+    candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
+    primary = evaluation.run_primary_frame(
+        raw_frame, tmp_path / "primary", candidates=candidates, seed=7
+    )
+    path = primary / "predictions.csv"
+    original = pd.read_csv(path)
+    pharmacogenomic = original.index[original["procedure"].eq("pharmacogenomic_ml")]
+    mutations = {
+        "pharmacogenomic_ml patient-key coverage": original.drop(pharmacogenomic[0]),
+        "pharmacogenomic_ml site match": original.assign(
+            site=original["site"].mask(original.index == pharmacogenomic[0], "wrong-site")
+        ),
+        "pharmacogenomic_ml target match": original.assign(
+            y_true=original["y_true"].mask(
+                original.index == pharmacogenomic[0],
+                original.loc[pharmacogenomic[0], "y_true"] + 1,
+            )
+        ),
+    }
+
+    for problem, mutated in mutations.items():
+        mutated.to_csv(path, index=False)
+        with pytest.raises(ValueError, match=problem):
+            evaluation.validate_primary_run(raw_frame, primary, seed=7)
+
+
+def test_feature_selection_validates_primary_before_computing(raw_frame, tmp_path, monkeypatch):
+    from warfarin_dose import evaluation
+
+    def reject(*_args, **_kwargs):
+        raise RuntimeError("primary validation sentinel")
+
+    monkeypatch.setattr(evaluation, "validate_primary_run", reject)
+
+    with pytest.raises(RuntimeError, match="primary validation sentinel"):
+        evaluation.run_feature_selection_frame(
+            raw_frame,
+            tmp_path / "missing-primary",
+            tmp_path / "feature-selection",
+            candidates=[],
+            seed=7,
+        )
+
+
 def test_primary_final_artifact_uses_one_se_feature_set(raw_frame, tmp_path, monkeypatch):
     from warfarin_dose import evaluation
 
@@ -322,6 +369,7 @@ def test_random_cv_uses_fold_local_statin_gate(raw_frame, tmp_path, monkeypatch)
 
     assert len(gate_calls) == 10
     assert selections["statin_included"].all()
+    assert selections["outer_site"].eq("mixed").all()
 
 
 def test_secondary_analyses_are_separate_and_keep_complete_case_from_final_model(
@@ -377,6 +425,28 @@ def test_secondary_analyses_are_separate_and_keep_complete_case_from_final_model
     assert not complete_selections["statin_included"].any()
     ablation_metrics = pd.read_csv(tmp_path / "ablation" / "metrics.csv")
     assert not ablation_metrics["procedure"].str.contains("ablation_ranked_").any()
+    manifests = {
+        name: json.loads((tmp_path / name / "manifest.json").read_text(encoding="utf-8"))
+        for name in ["feature-selection", "complete-case", "random-cv", "ablation"]
+    }
+    assert all(manifest["source_sha256"] for manifest in manifests.values())
+    assert {
+        "feature_rankings_by_outer_fold.csv",
+        "feature_rankings.csv",
+        "featranker_reports.json",
+        "feature_selection_decision.json",
+    } <= set(manifests["feature-selection"]["output_files"])
+    assert "cohort_counts.json" in manifests["complete-case"]["output_files"]
+    assert "ablation_plan.json" in manifests["ablation"]["output_files"]
+    primary_manifest = json.loads(
+        (tmp_path / "primary" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifests["feature-selection"]["primary_git_revision"] == primary_manifest[
+        "git_revision"
+    ]
+    assert manifests["feature-selection"]["primary_source_sha256"] == primary_manifest[
+        "source_sha256"
+    ]
 
 
 def test_ranked_adoption_updates_final_artifact_provenance(tmp_path, monkeypatch):

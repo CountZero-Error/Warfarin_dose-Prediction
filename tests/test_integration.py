@@ -9,6 +9,24 @@ from warfarin_dose.models import ModelSpec
 from warfarin_dose.reporting import build_report, predict_patient
 
 
+def test_binned_calibration_aggregates_patient_rows():
+    from warfarin_dose import reporting
+
+    predictions = pd.DataFrame(
+        {
+            "procedure": ["a"] * 12 + ["b"] * 12,
+            "y_true": list(range(12)) * 2,
+            "y_pred": list(range(1, 13)) + list(range(2, 14)),
+        }
+    )
+
+    summary = reporting._binned_calibration(predictions, bins=3)
+
+    assert set(summary) == {"procedure", "observed", "predicted", "n"}
+    assert len(summary) <= 6
+    assert summary["n"].sum() == len(predictions)
+
+
 def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     candidates = [ModelSpec("ridge", {"alpha": 1.0}, "direct", 0, 0)]
     run_dir = run_primary_frame(raw_frame, tmp_path / "run", candidates=candidates, seed=7)
@@ -18,6 +36,9 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     manifest_path = run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["final_model_git_revision"] = "separate-final-model-revision"
+    manifest["final_feature_set"] = "pharmacogenomic_ranked"
+    manifest["final_feature_columns"] = ["vkorc1", "weight_kg"]
+    manifest["final_model_source_sha256"] = "public-source-checksum"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     report = build_report(run_dir)
     artifact = joblib.load(run_dir / "final_model.joblib")
@@ -51,6 +72,11 @@ def test_synthetic_run_builds_report_and_safe_prediction(raw_frame, tmp_path):
     run_manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert f'Analysis-code revision: `{run_manifest["git_revision"]}`.' in report_text
     assert "Final-model revision: `separate-final-model-revision`." in report_text
+    assert "nested fold-wise ranking procedure" in report_text
+    assert "not performance of the static full-cohort refit" in report_text
+    assert "Final artifact label: `pharmacogenomic_ranked`" in report_text
+    assert "`vkorc1`, `weight_kg`" in report_text
+    assert "Final-model source SHA-256: `public-source-checksum`" in report_text
     assert (run_dir / "report" / "tables" / "overall_metrics.csv").exists()
     selection_frequencies = pd.read_csv(
         run_dir / "report" / "tables" / "selection_frequencies.csv"
