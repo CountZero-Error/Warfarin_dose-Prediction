@@ -56,8 +56,8 @@ recommendation.
 
 ## Reproducibility
 This report was generated from saved CSV/JSON artifacts; it neither fits models nor recomputes
-predictions. Analysis-code revision: `6ea7757e00182c164e4985838e8d406f44de5f12`.
-Final-model revision: `5c22cade700edc568fcb16ef9795cd77ae146c50`. The source run retains a machine-readable
+predictions. Sanitized analysis-code revision: `7ea3e03dc5b2bedea4e0af48421c0e6474c24283`.
+Sanitized final-model revision: `ec753167d82242a8c176f3f2f7b1e09ad4a22dea`. The source run retains a machine-readable
 manifest outside this curated report.
 
 ## Research-use warning

@@ -42,7 +42,7 @@ The verified public-data run retained 5,410 eligible patients from 21 sites. Und
 
 The nested fold-wise FeatRanker procedure achieved out-of-site MAE 9.38 mg/week; each outer training fold selected its own ranked subset. The separately refitted final artifact uses the aggregate-ranked static inputs `vkorc1`, `weight_kg`, `age_decade`, `cyp2c9_group`, and `height_cm`. The 9.38 value evaluates the nested procedure, not that static full-cohort refit. Random-CV MAE was 8.77 mg/week and is labeled only as an optimism comparator.
 
-The frozen evaluation was generated at revision `6ea7757e00182c164e4985838e8d406f44de5f12`. The selected five-feature final artifact was provenance-corrected and deterministically refit at revision `5c22cade700edc568fcb16ef9795cd77ae146c50` without changing the frozen outer predictions.
+The frozen evaluation was generated at sanitized revision `7ea3e03dc5b2bedea4e0af48421c0e6474c24283`. The selected five-feature final artifact was provenance-corrected and deterministically refit at sanitized revision `ec753167d82242a8c176f3f2f7b1e09ad4a22dea` without changing the frozen outer predictions.
 
 - [Curated research report](results/README.md)
 - [Overall metrics](results/tables/overall_metrics.csv)
