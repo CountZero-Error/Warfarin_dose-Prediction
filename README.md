@@ -33,18 +33,7 @@ Can pre-treatment clinical and pharmacogenomic data estimate stable warfarin dos
 
 Random train/test splits mix patients from the same clinical sites and produced an optimistic MAE of **8.77 mg/week**. The primary design instead holds out one entire site at a time, approximating deployment into a hospital unseen during training.
 
-```mermaid
-block-beta
-    columns 3
-    A["Public IWPC data"] B["Eligibility and leakage audit"] C["Hold out one clinical site"]
-    F["Repeat across all 21 sites and aggregate out-of-site evidence"] E["Evaluate once on held-out site"] D["Train, select, and calibrate on other sites"]
-
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    E --> F
-```
+![Two-row site-aware evaluation workflow](docs/site-aware-workflow.svg)
 
 All preprocessing, model selection, feature ranking, and conformal calibration are fitted without access to the outer test site.
 
