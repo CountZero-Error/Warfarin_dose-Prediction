@@ -37,15 +37,13 @@ Random train/test splits mix patients from the same clinical sites and produced 
 block-beta
     columns 3
     A["Public IWPC data"] B["Eligibility and leakage audit"] C["Hold out one clinical site"]
-    F["Repeat across all 21 sites"] E["Evaluate once on held-out site"] D["Train, select, and calibrate on other sites"]
-    G["Aggregate out-of-site evidence"] space space
+    F["Repeat across all 21 sites and aggregate out-of-site evidence"] E["Evaluate once on held-out site"] D["Train, select, and calibrate on other sites"]
 
     A --> B
     B --> C
     C --> D
     D --> E
     E --> F
-    F --> G
 ```
 
 All preprocessing, model selection, feature ranking, and conformal calibration are fitted without access to the outer test site.
